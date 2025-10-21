@@ -1,15 +1,10 @@
-# 🎓 Education Insights & Resource Recommender
+# 🎓 EdEquity: An Education Insights & Resource Recommender
 
 An AI-powered conversational agent system that helps parents, educators, and policymakers make data-driven decisions about education resources and outcomes.
 
 ## 🎯 Project Overview
 
 This system uses Google Cloud's Vertex AI and BigQuery to analyze educational data and provide actionable insights through natural language conversations.
-
-### Example Queries
-- "Identify the five schools in the county with the highest rate of low-income students and the lowest per-pupil technology spending"
-- "Find schools with high graduation rates despite below-average funding"
-- "Find schools with strong STEM programs and low class sizes"
 
 ## 🏗️ Architecture
 
