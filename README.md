@@ -209,21 +209,8 @@ A4I-C1/
 - [ ] Predictive analytics
 - [ ] Mobile-friendly interface
 
-## 📝 Documentation
-
-See `PROJECT_PLAN.md` for detailed implementation steps.
-
-## 👥 Team
-
-[Your team information here]
-
-## 📄 License
-
-[Your license here]
-
 ## 🙏 Acknowledgments
 
 - Google Cloud for Vertex AI platform
 - Open education data providers
-- [Your team and advisors]
 
