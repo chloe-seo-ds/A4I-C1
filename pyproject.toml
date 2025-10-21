@@ -1,0 +1,158 @@
+[project]
+name = "education-insights"
+version = "0.1.0"
+description = "AI-powered education insights system with hierarchical sub-agents"
+authors = [
+    {name = "Chloe Seo"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+dependencies = [
+    # Core Google Cloud Dependencies
+    "google-cloud-aiplatform>=1.60.0",
+    "google-cloud-bigquery>=3.21.0",
+    "google-cloud-storage>=2.16.0",
+    "vertexai>=1.0.0",
+    
+    # Data Processing
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    
+    # Agent Development
+    "google-genai>=0.2.0",
+    "langchain>=0.1.0",
+    "langchain-google-vertexai>=1.0.0",
+    
+    # API and Web
+    "flask>=3.0.0",
+    "requests>=2.31.0",
+    
+    # UI (Optional)
+    "streamlit>=1.32.0",
+    "gradio>=4.20.0",
+    
+    # Visualization (Optional)
+    "plotly>=5.19.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    "folium>=0.15.0",
+    
+    # Database
+    "sqlalchemy>=2.0.0",
+    "db-dtypes>=1.2.0",
+    
+    # Utilities
+    "python-dotenv>=1.0.0",
+    "python-dateutil>=2.8.2",
+    "pytz>=2024.1",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.0",
+    
+    # Development Tools
+    "black>=24.0.0",
+    "flake8>=7.0.0",
+    "mypy>=1.8.0",
+    "isort>=5.13.0",
+    "ruff>=0.3.0",
+    
+    # Jupyter
+    "ipython>=8.20.0",
+    "jupyter>=1.0.0",
+    "ipykernel>=6.29.0",
+]
+
+test = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+education-insights = "main:main"
+setup-data = "scripts.download_sample_data:main"
+load-bigquery = "scripts.load_to_bigquery:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agents", "tools", "scripts"]
+
+[tool.uv]
+dev-dependencies = [
+    "black>=24.0.0",
+    "flake8>=7.0.0",
+    "mypy>=1.8.0",
+    "isort>=5.13.0",
+    "ruff>=0.3.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_gitignore = true
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=agents --cov=tools --cov-report=html --cov-report=term"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+

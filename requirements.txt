@@ -1,0 +1,47 @@
+# Core Google Cloud Dependencies
+google-cloud-aiplatform>=1.60.0
+google-cloud-bigquery>=3.21.0
+google-cloud-storage>=2.16.0
+vertexai>=1.0.0
+
+# Google Agent Development Kit (ADK)
+google-genai>=0.2.0
+
+# Data Processing
+pandas>=2.2.0
+numpy>=1.26.0
+
+# API and Web
+flask>=3.0.0
+requests>=2.31.0
+
+# UI (Optional)
+streamlit>=1.32.0
+gradio>=4.20.0
+
+# Visualization (Optional)
+plotly>=5.19.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+folium>=0.15.0
+
+# Database
+sqlalchemy>=2.0.0
+db-dtypes>=1.2.0
+
+# Testing
+pytest>=8.0.0
+pytest-cov>=4.1.0
+
+# Development Tools
+python-dotenv>=1.0.0
+black>=24.0.0
+flake8>=7.0.0
+ipython>=8.20.0
+jupyter>=1.0.0
+
+# Utilities
+python-dateutil>=2.8.2
+pytz>=2024.1
+tqdm>=4.66.0
+
