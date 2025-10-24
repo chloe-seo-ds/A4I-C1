@@ -197,37 +197,88 @@ async def chat(message: ChatMessage):
         
         # If no specific pattern matched, use root_agent for general questions
         if response_text is None:
-            print("   → General query - using Root Agent with Gemini")
+            print("   → General query - using Root Agent (ADK)")
             
             try:
-                # Use the root agent to handle general education questions
-                from main import create_runner_state
+                # Use Google Generative AI with API key for general questions
+                # Note: Specific research questions use ADK agents via BigQuery tools above
+                import google.genai as genai
                 
-                # Create runner state with context
-                state = create_runner_state(
-                    query=message.message,
-                    user_type=message.user_role
+                # Configure with API key (from environment variable)
+                # Use vertexai=False to ensure we use Google AI API, not Vertex AI
+                api_key = os.getenv("GOOGLE_API_KEY")
+                if not api_key:
+                    raise ValueError("GOOGLE_API_KEY environment variable not set")
+                
+                client = genai.Client(api_key=api_key, vertexai=False)
+                
+                # Create a contextualized prompt for the role
+                system_instruction = f"""You are an education expert assistant helping {message.user_role}s make informed decisions about schools and education.
+
+Provide helpful, practical advice based on education best practices. When asked for school recommendations, provide SPECIFIC school names, locations, and details whenever possible.
+
+Answer questions directly with concrete recommendations and examples. Be specific and actionable.
+
+Keep responses clear, detailed, and tailored to a {message.user_role}'s perspective.
+
+Note: For data-driven comparisons about California schools (2018 data), I can also provide detailed analytics about:
+- Schools with high low-income students and low tech spending
+- Schools with high graduation rates despite low funding
+- Schools with strong STEM programs and small class sizes"""
+                
+                # Generate response using gemini-2.5-flash
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=f"{system_instruction}\n\nUser Question: {message.message}"
                 )
                 
-                # Run the root agent
-                result_state = root_agent.run(state)
+                agent_response = response.text
+                print(f"   → Gemini 2.5 response length: {len(agent_response)}")
                 
-                # Extract the response
-                agent_response = result_state.get('output', '') or result_state.get('response', '')
+                # Format as HTML with clean styling - convert markdown to HTML
+                import html
+                import re
                 
-                # Format as HTML
+                # Convert markdown to HTML
+                formatted_text = agent_response
+                
+                # Headings: ### text -> styled heading
+                formatted_text = re.sub(r'^#### (.*?)$', r'<h4 style="color: #374151; font-size: 1rem; margin: 1rem 0 0.5rem 0; font-weight: 600;">\1</h4>', formatted_text, flags=re.MULTILINE)
+                formatted_text = re.sub(r'^### (.*?)$', r'<h3 style="color: #1f2937; font-size: 1.1rem; margin: 1.25rem 0 0.75rem 0; font-weight: 600;">\1</h3>', formatted_text, flags=re.MULTILINE)
+                formatted_text = re.sub(r'^## (.*?)$', r'<h2 style="color: #1f2937; font-size: 1.25rem; margin: 1.5rem 0 1rem 0; font-weight: 700;">\1</h2>', formatted_text, flags=re.MULTILINE)
+                formatted_text = re.sub(r'^# (.*?)$', r'<h1 style="color: #111827; font-size: 1.5rem; margin: 1.5rem 0 1rem 0; font-weight: 700;">\1</h1>', formatted_text, flags=re.MULTILINE)
+                
+                # Bold: **text** -> <strong>text</strong>
+                formatted_text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', formatted_text)
+                
+                # Italic: *text* -> <em>text</em> (but not if it's part of **)
+                formatted_text = re.sub(r'(?<!\*)\*(?!\*)([^\*]+?)(?<!\*)\*(?!\*)', r'<em>\1</em>', formatted_text)
+                
+                # Bullet points: * item -> • item
+                formatted_text = re.sub(r'^\* ', '• ', formatted_text, flags=re.MULTILINE)
+                formatted_text = re.sub(r'\n\* ', '\n• ', formatted_text)
+                
+                # Numbered lists: enhance spacing
+                formatted_text = re.sub(r'^(\d+\.)', r'<strong>\1</strong>', formatted_text, flags=re.MULTILINE)
+                
+                # Preserve line breaks
+                formatted_response = formatted_text.replace('\n', '<br>')
+                
                 response_text = f"""<div style="padding: 20px;">
 <h2 style="color: #1f2937; margin-bottom: 15px;">🎓 Education Insights</h2>
-<div style="background: white; padding: 20px; border-radius: 8px; line-height: 1.6;">
-{agent_response.replace(chr(10), '<br>')}
+<div style="background: white; padding: 20px; border-radius: 8px; line-height: 1.6; color: #374151;">
+{formatted_response}
 </div>
 <p style="margin-top: 15px; color: #6b7280; font-size: 0.9rem;">
-💡 <em>Powered by Gemini AI with access to California education data (2018)</em>
+💡 <em>Powered by Gemini AI - Ask me anything about education, schools, or learning!</em>
 </p>
 </div>"""
                 
             except Exception as e:
-                print(f"   ⚠️ Root agent error: {e}")
+                print(f"   ⚠️ Gemini error: {e}")
+                import traceback
+                traceback.print_exc()
+                
                 # Fallback to helpful message
                 response_text = f"""<div style="padding: 20px;">
 <h2 style="color: #1f2937; margin-bottom: 15px;">💡 How I Can Help</h2>

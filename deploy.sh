@@ -65,6 +65,15 @@ else
     GOOGLE_MAPS_API_KEY=""
 fi
 
+# Load Google AI API key for Gemini access
+if [ -f "secrets/google_api_key.txt" ]; then
+    GOOGLE_API_KEY=$(cat secrets/google_api_key.txt | tr -d '\n')
+    echo "✅ Google AI API key loaded (for Gemini 2.0)"
+else
+    echo "⚠️  No Google AI API key found - using Vertex AI fallback"
+    GOOGLE_API_KEY=""
+fi
+
 # Deploy to Cloud Run
 gcloud run deploy ${SERVICE_NAME} \
     --project=${PROJECT_ID} \
@@ -82,6 +91,7 @@ gcloud run deploy ${SERVICE_NAME} \
     --set-env-vars="GOOGLE_CLOUD_LOCATION=${REGION}" \
     --set-env-vars="BIGQUERY_DATASET=education_data" \
     --set-env-vars="GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}" \
+    --set-env-vars="GOOGLE_API_KEY=${GOOGLE_API_KEY}" \
     --service-account=${SERVICE_ACCOUNT_NAME}
 
 echo ""
