@@ -1,6 +1,14 @@
-# 🎓 EdEquity: An Education Insights & Resource Recommender
+# 🎓 EdEquity: Education Insights & Resource Recommender
 
 An AI-powered conversational agent system that helps parents, educators, and policymakers make data-driven decisions about education resources and outcomes.
+
+## ✨ Features
+
+- 📊 **Interactive Data Visualizations**: Dynamic charts showing key metrics (Chart.js)
+- 🗺️ **Google Maps Integration**: View school locations with detailed info windows
+- 📝 **Executive Summaries**: Direct answers with school names and key metrics upfront
+- 📋 **Detailed Data Tables**: Sortable, comprehensive school data
+- 🎨 **Modern UI**: Beautiful, responsive interface with role-based interactions
 
 ## 🎯 Project Overview
 
@@ -89,7 +97,21 @@ pip install -r requirements.txt
 
 See `UV_SETUP.md` for detailed UV instructions.
 
-### 3. Load Data into BigQuery
+### 3. Configure Google Maps API (Optional)
+
+For map visualizations, add your Google Maps API key:
+
+```bash
+# Create secrets directory if it doesn't exist
+mkdir -p secrets
+
+# Add your API key
+echo "YOUR_GOOGLE_MAPS_API_KEY" > secrets/maps_api_key.txt
+```
+
+**Note**: Maps will be disabled if no API key is provided. The system will still work without maps.
+
+### 4. Load Data into BigQuery
 
 ```bash
 # Create dataset
@@ -102,7 +124,7 @@ bq load --source_format=CSV \
   auto
 ```
 
-### 4. Run Agents Locally
+### 5. Run Agents Locally
 
 ```bash
 # Test individual agents
@@ -114,7 +136,7 @@ python agents/insights_agent.py
 python main.py
 ```
 
-### 5. Deploy to Vertex AI (Production)
+### 6. Deploy to Vertex AI (Production)
 
 ```bash
 # Deploy agents
@@ -157,6 +179,21 @@ python main.py
 
 ## 🚀 Usage
 
+### Web UI
+```bash
+# Start the FastAPI server
+python api.py
+
+# Open in browser
+# http://localhost:8080
+```
+
+The web interface provides:
+- **Executive Summary**: Direct answers with top 5 schools listed
+- **Interactive Charts**: Bar charts showing key metrics (low-income %, spending, graduation rates, etc.)
+- **Google Maps**: Interactive map with school locations and info windows
+- **Detailed Data Table**: Full dataset with sortable columns
+
 ### Python API
 ```python
 from agents.root_agent import RootAgent
@@ -166,11 +203,6 @@ response = agent.query(
     "Find schools with high graduation rates despite below-average funding"
 )
 print(response)
-```
-
-### Streamlit UI (if implemented)
-```bash
-streamlit run app.py
 ```
 
 ## 📁 Project Structure
@@ -184,18 +216,18 @@ A4I-C1/
 │   └── config.py              # Configuration
 ├── tools/
 │   ├── bigquery_tools.py      # BigQuery utilities
+│   ├── response_formatter.py  # Rich response formatter (charts, maps, tables)
 │   └── analysis_tools.py      # Analysis functions
+├── static/
+│   └── index.html             # Web UI
+├── secrets/
+│   └── maps_api_key.txt       # Google Maps API key (gitignored)
 ├── data/
-│   └── *.csv                  # Raw data files
-├── tests/
-│   └── test_agents.py         # Unit tests
-├── deployment/
-│   └── deploy.yaml            # Deployment config
-├── notebooks/
-│   └── data_exploration.ipynb # Data analysis
+│   └── *.parquet              # Education data files
+├── api.py                     # FastAPI backend
+├── main.py                    # CLI entry point
 ├── requirements.txt
-├── README.md
-└── PROJECT_PLAN.md            # Detailed implementation guide
+└── README.md
 ```
 
 ## 🎬 Demo Scenarios

@@ -258,6 +258,41 @@ def get_district_finance(
         }
 
 
+def get_state_averages(
+    tool_context: ToolContext = None
+) -> Dict[str, Any]:
+    """
+    Get California state averages for comparison.
+    
+    Returns:
+        Dictionary with state-wide average metrics
+    """
+    try:
+        project_id = tool_context.state.get("project_id")
+        dataset = tool_context.state.get("bigquery_dataset", "education_data")
+        
+        query = f"""
+        SELECT 
+            AVG(ROUND(c.free_lunch / NULLIF(c.enrollment, 0) * 100, 1)) as avg_low_income_pct,
+            AVG(f.per_pupil_total) as avg_per_pupil_spending,
+            AVG(g.grad_rate_midpt) as avg_graduation_rate,
+            AVG(ROUND(c.enrollment / NULLIF(c.teachers_fte, 0), 1)) as avg_student_teacher_ratio
+        FROM `{project_id}.{dataset}.ccd_directory` c
+        LEFT JOIN `{project_id}.{dataset}.district_finance` f ON c.leaid = f.LEAID
+        LEFT JOIN `{project_id}.{dataset}.graduation_rates` g ON c.ncessch = g.ncessch 
+            AND g.race = 99 AND g.disability = 99 AND g.econ_disadvantaged = 99
+        WHERE c.enrollment >= 100
+        """
+        
+        result = query_bigquery(query, tool_context)
+        if result.get("status") == "success" and result.get("data"):
+            return result["data"][0]
+        return {}
+    except Exception as e:
+        print(f"Error getting state averages: {e}")
+        return {}
+
+
 def find_high_need_low_tech_spending(
     county: Optional[str] = None,
     limit: int = 5,
@@ -281,6 +316,9 @@ def find_high_need_low_tech_spending(
         project_id = tool_context.state.get("project_id")
         dataset = tool_context.state.get("bigquery_dataset", "education_data")
         
+        # Get state averages for comparison
+        state_avg = get_state_averages(tool_context)
+        
         query = f"""
         SELECT 
             c.school_name,
@@ -289,6 +327,8 @@ def find_high_need_low_tech_spending(
             c.county_code,
             c.enrollment,
             c.free_lunch,
+            c.latitude,
+            c.longitude,
             ROUND(c.free_lunch / NULLIF(c.enrollment, 0) * 100, 1) as low_income_pct,
             ROUND(c.enrollment / NULLIF(c.teachers_fte, 0), 1) as student_teacher_ratio,
             COALESCE(f.per_pupil_total, 0) as per_pupil_total,
@@ -333,6 +373,7 @@ def find_high_need_low_tech_spending(
             )
         
         result['summary'] = '\n'.join(summary_lines)
+        result['state_averages'] = state_avg
         return result
         
     except Exception as e:
@@ -368,12 +409,17 @@ def find_high_graduation_low_funding(
         project_id = tool_context.state.get("project_id")
         dataset = tool_context.state.get("bigquery_dataset", "education_data")
         
+        # Get state averages for comparison
+        state_avg = get_state_averages(tool_context)
+        
         query = f"""
         SELECT 
             c.school_name,
             c.lea_name,
             c.city_location,
             c.enrollment,
+            c.latitude,
+            c.longitude,
             ROUND(c.free_lunch / NULLIF(c.enrollment, 0) * 100, 1) as low_income_pct,
             g.grad_rate_midpt as graduation_rate,
             g.cohort_num,
@@ -421,6 +467,7 @@ def find_high_graduation_low_funding(
             )
         
         result['summary'] = '\n'.join(summary_lines)
+        result['state_averages'] = state_avg
         return result
         
     except Exception as e:
@@ -454,6 +501,9 @@ def find_strong_stem_low_class_size(
         project_id = tool_context.state.get("project_id")
         dataset = tool_context.state.get("bigquery_dataset", "education_data")
         
+        # Get state averages for comparison
+        state_avg = get_state_averages(tool_context)
+        
         # Query with STEM data joined (using AP courses as STEM indicator)
         query = f"""
         SELECT 
@@ -461,6 +511,8 @@ def find_strong_stem_low_class_size(
             c.lea_name,
             c.city_location,
             c.enrollment,
+            c.latitude,
+            c.longitude,
             ROUND(c.enrollment / NULLIF(c.teachers_fte, 0), 1) as student_teacher_ratio,
             c.school_level,
             c.charter,
@@ -502,6 +554,7 @@ def find_strong_stem_low_class_size(
             )
         
         result['summary'] = '\n'.join(summary_lines)
+        result['state_averages'] = state_avg
         return result
         
     except Exception as e:
@@ -568,6 +621,8 @@ def search_schools_with_stem(
             c.lea_name,
             c.city_location,
             c.enrollment as school_enrollment,
+            c.latitude,
+            c.longitude,
             ({enrollment_col}) as course_enrollment,
             ROUND(c.enrollment / NULLIF(c.teachers_fte, 0), 1) as student_teacher_ratio
         FROM `{project_id}.{dataset}.ccd_directory` c
