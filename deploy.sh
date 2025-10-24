@@ -56,6 +56,15 @@ echo "=========================================="
 echo "🚢 Step 2: Deploying to Cloud Run"
 echo "=========================================="
 
+# Load Maps API key if available
+if [ -f "secrets/maps_api_key.txt" ]; then
+    GOOGLE_MAPS_API_KEY=$(cat secrets/maps_api_key.txt | tr -d '\n')
+    echo "✅ Google Maps API key loaded"
+else
+    echo "⚠️  No Google Maps API key found - maps will be disabled"
+    GOOGLE_MAPS_API_KEY=""
+fi
+
 # Deploy to Cloud Run
 gcloud run deploy ${SERVICE_NAME} \
     --project=${PROJECT_ID} \
@@ -64,14 +73,15 @@ gcloud run deploy ${SERVICE_NAME} \
     --platform=managed \
     --allow-unauthenticated \
     --memory=2Gi \
-    --cpu=2 \
+    --cpu=1 \
     --timeout=300 \
-    --max-instances=10 \
+    --max-instances=5 \
     --min-instances=0 \
     --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" \
     --set-env-vars="GOOGLE_GENAI_USE_VERTEXAI=TRUE" \
     --set-env-vars="GOOGLE_CLOUD_LOCATION=${REGION}" \
     --set-env-vars="BIGQUERY_DATASET=education_data" \
+    --set-env-vars="GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}" \
     --service-account=${SERVICE_ACCOUNT_NAME}
 
 echo ""

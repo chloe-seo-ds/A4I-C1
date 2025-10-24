@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Education Insights & Resource Recommender</title>
+    <title>EdEquity: Education Insights & Resource Recommender</title>
+    
+    <!-- Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAP7_FFt8qXeovpFFtaWubeRN4HE0yF7dI&callback=Function.prototype" async defer></script>
+    
     <style>
         * {
             margin: 0;
@@ -173,7 +177,7 @@
         }
 
         .role-prompt {
-            text-center;
+            text-align: center;
             color: #334155;
             margin-bottom: 1.5rem;
             font-size: 1.125rem;
@@ -410,7 +414,9 @@
             border-radius: 0.75rem;
             box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
             overflow: hidden;
-            height: 600px;
+            height: 80vh;
+            min-height: 600px;
+            max-height: 1200px;
             display: flex;
             flex-direction: column;
         }
@@ -460,6 +466,49 @@
             padding: 1rem;
             border-radius: 0.75rem;
             line-height: 1.6;
+            overflow-x: auto;
+        }
+        
+        /* Rich content styling within messages */
+        .message-content h2 {
+            color: #1f2937;
+            font-size: 1.2rem;
+            margin: 0.5rem 0 1rem 0;
+        }
+        
+        .message-content h3 {
+            color: #374151;
+            font-size: 1rem;
+            margin: 0.5rem 0 0.5rem 0;
+        }
+        
+        .message-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+        
+        .message-content .charts-container,
+        .message-content .map-container,
+        .message-content .data-table-container {
+            margin: 1rem 0;
+        }
+        
+        .message-content canvas {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .message-content .executive-summary {
+            margin-bottom: 1.5rem;
+        }
+        
+        .message-content .executive-summary h2 {
+            margin-bottom: 1rem;
+        }
+        
+        .message-content .executive-summary p {
+            line-height: 1.8;
         }
 
         .message.assistant .message-content {
@@ -613,7 +662,7 @@
             </div>
             <div class="header-text">
                 <h1>
-                    Education Insights & Resource Recommender
+                    EdEquity: Education Insights & Resource Recommender
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M5 3v7a5 5 0 0 0 10 0V3M2 21h8m8 0h4"></path>
                     </svg>
@@ -896,6 +945,171 @@
             
             messagesArea.appendChild(messageDiv);
             messagesArea.scrollTop = messagesArea.scrollHeight;
+            
+            // Initialize charts and maps in the new content
+            if (role === 'assistant') {
+                setTimeout(() => {
+                    initializeCharts();
+                    initializeMaps();
+                }, 100);
+            }
+        }
+        
+        // Initialize all charts in the page
+        function initializeCharts() {
+            if (typeof Chart === 'undefined') {
+                console.log('Chart.js not loaded yet');
+                return;
+            }
+            
+            console.log('Initializing charts...');
+            document.querySelectorAll('.chart-canvas').forEach(canvas => {
+                // Skip if already initialized
+                if (canvas.chart) {
+                    console.log('Chart already initialized:', canvas.id);
+                    return;
+                }
+                
+                try {
+                    const configJson = canvas.dataset.chartConfig;
+                    if (!configJson) {
+                        console.log('No config found for canvas:', canvas.id);
+                        return;
+                    }
+                    
+                    console.log('Parsing config for:', canvas.id);
+                    // HTML entities are automatically decoded by dataset
+                    const config = JSON.parse(configJson);
+                    console.log('Config parsed:', config.type, config.labels.length, 'labels');
+                    
+                    // Create Chart.js config
+                    const chartConfig = {
+                        type: config.type,
+                        data: {
+                            labels: config.labels,
+                            datasets: config.datasets
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    display: config.datasets.length > 1,
+                                    position: 'top',
+                                    labels: {
+                                        font: { size: 12 },
+                                        padding: 15,
+                                        usePointStyle: true
+                                    }
+                                },
+                                tooltip: {
+                                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                                    padding: 12,
+                                    titleFont: { size: 14 },
+                                    bodyFont: { size: 13 }
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    grid: {
+                                        color: 'rgba(0, 0, 0, 0.05)'
+                                    },
+                                    ticks: {
+                                        font: { size: 11 }
+                                    }
+                                },
+                                x: {
+                                    grid: {
+                                        display: false
+                                    },
+                                    ticks: {
+                                        font: { size: 10 },
+                                        maxRotation: 45,
+                                        minRotation: 45
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    
+                    canvas.chart = new Chart(canvas, chartConfig);
+                    console.log('✅ Chart created successfully:', canvas.id);
+                } catch (error) {
+                    console.error('❌ Error initializing chart:', canvas.id, error);
+                }
+            });
+        }
+        
+        // Initialize all maps in the page
+        function initializeMaps() {
+            if (typeof google === 'undefined' || !google.maps) {
+                console.log('Google Maps not loaded yet');
+                return;
+            }
+            
+            document.querySelectorAll('.school-map').forEach(mapDiv => {
+                // Skip if already initialized
+                if (mapDiv.map) return;
+                
+                try {
+                    const configJson = mapDiv.dataset.mapConfig;
+                    if (!configJson) return;
+                    
+                    const config = JSON.parse(configJson);
+                    
+                    const map = new google.maps.Map(mapDiv, {
+                        center: config.center,
+                        zoom: 10,
+                        styles: [
+                            {
+                                featureType: 'poi.school',
+                                stylers: [{ visibility: 'on' }]
+                            }
+                        ]
+                    });
+                    
+                    const infoWindow = new google.maps.InfoWindow();
+                    
+                    config.markers.forEach(markerData => {
+                        const marker = new google.maps.Marker({
+                            position: markerData.position,
+                            map: map,
+                            title: markerData.title,
+                            label: {
+                                text: markerData.label,
+                                color: 'white',
+                                fontSize: '12px',
+                                fontWeight: 'bold'
+                            },
+                            icon: {
+                                path: google.maps.SymbolPath.CIRCLE,
+                                scale: 12,
+                                fillColor: '#3b82f6',
+                                fillOpacity: 0.9,
+                                strokeColor: '#1e40af',
+                                strokeWeight: 2,
+                                labelOrigin: new google.maps.Point(0, 0)
+                            }
+                        });
+                        
+                        marker.addListener('click', () => {
+                            infoWindow.setContent(`<div style="padding: 8px;">${markerData.info}</div>`);
+                            infoWindow.open(map, marker);
+                        });
+                    });
+                    
+                    // Fit bounds to show all markers
+                    const bounds = new google.maps.LatLngBounds();
+                    config.markers.forEach(m => bounds.extend(m.position));
+                    map.fitBounds(bounds);
+                    
+                    mapDiv.map = map;
+                    console.log('Map initialized:', mapDiv.id);
+                } catch (error) {
+                    console.error('Error initializing map:', error);
+                }
+            });
         }
 
         // Show loading indicator
