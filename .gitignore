@@ -29,6 +29,13 @@ ENV/
 .gcloud/
 *.json  # Service account keys
 credentials/
+*.key
+*.pem
+
+# Secrets (API keys, tokens, passwords)
+secrets/
+!secrets/.gitkeep
+!secrets/README.md
 
 # Environment Variables
 .env
