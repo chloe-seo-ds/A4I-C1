@@ -7,12 +7,12 @@ from google.adk.tools import FunctionTool
 from tools.bigquery_tools import (
     query_bigquery,
     get_school_data,
-    get_test_scores,
-    get_demographics,
+    get_graduation_data,
+    get_district_finance,
     find_high_need_low_tech_spending,
     find_high_graduation_low_funding,
     find_strong_stem_low_class_size,
-    search_education_data
+    search_schools_with_stem
 )
 
 
@@ -31,72 +31,69 @@ def create_data_agent(project_id: str, dataset: str = "education_data") -> LlmAg
     """
     
     # Define the agent's instruction
-    instruction = f"""You are the Data Sub-Agent for the Education Insights & Resource Recommender system.
+    instruction = f"""You are the Data Sub-Agent for the California Education Insights system.
 
-Your PRIMARY responsibility is to retrieve education data from BigQuery.
+Your PRIMARY responsibility is to retrieve education data from BigQuery (California schools, 2018 data).
+
+AVAILABLE BIGQUERY TABLES:
+- ccd_directory (10,000 CA schools): demographics, enrollment, teachers, location
+- graduation_rates (788 high schools): graduation rates by school
+- district_finance (2,198 districts): per-pupil spending, total expenditures
+- stem_* tables (12 tables): AP, Calculus, Physics, Chemistry, Biology, etc.
 
 AVAILABLE TOOLS:
-1. query_bigquery - Execute any SQL query against BigQuery
-2. get_school_data - Get school information (filtered by state/district)
-3. get_test_scores - Get test performance data (filtered by state/subject/year)
-4. get_demographics - Get student demographic data
+1. query_bigquery - Execute custom SQL queries
+2. get_school_data - Get school info with calculated metrics (low_income_pct, student_teacher_ratio)
+3. get_graduation_data - Get graduation rates for high schools
+4. get_district_finance - Get per-pupil spending and district finances
 
-SPECIALIZED QUERY TOOLS (for common priority questions):
-5. find_high_need_low_tech_spending - Find schools with high low-income % and low tech spending (for grant prioritization)
-6. find_high_graduation_low_funding - Find efficient schools with high grad rates despite low funding (for replicable models)
-7. find_strong_stem_low_class_size - Find schools with strong STEM and favorable class sizes
-8. search_education_data - Fallback when BigQuery data is not available
+SPECIALIZED RESEARCH QUESTION TOOLS:
+5. find_high_need_low_tech_spending - Q1: Schools with high low-income % + low spending (grant priority)
+6. find_high_graduation_low_funding - Q2: High graduation despite high poverty (replicable models)
+7. find_strong_stem_low_class_size - Q3: Strong STEM programs + low class sizes
+8. search_schools_with_stem - Search schools by specific STEM course (AP, calculus, physics, etc.)
+
+KEY COLUMN MAPPINGS:
+- School ID: ncessch
+- District ID: leaid  
+- Low-income indicator: free_lunch / enrollment * 100
+- Class size: enrollment / teachers_fte
+- STEM join: CONCAT(leaid, school_id) = COMBOKEY
 
 GUIDELINES:
-- When asked for data, translate the request into appropriate tool calls
-- Always use specialized tools (#5-7) for those specific questions - they handle missing data gracefully
-- Use get_school_data, get_test_scores, or get_demographics when possible (they're optimized)
-- Only use query_bigquery for complex custom queries
-- Return structured data in a clear format
-- If a query returns no results, explain why and suggest alternatives
-- If data is missing from BigQuery, the specialized tools will return helpful guidance
-- Include row counts in your responses
-
-HANDLING MISSING DATA:
-- Specialized tools (#5-7) automatically check if data exists
-- If data is missing, they return status="partial" with recommendations
-- When you see status="partial", explain to the Root Agent what data is missing
-- Suggest that the user provide the data or ask if they want general guidance instead
-- Be helpful and proactive - offer alternatives when exact data isn't available
+- Use specialized tools (#5-7) for the 3 research questions - they have optimized JOINs
+- Tools automatically calculate metrics (low_income_pct, student_teacher_ratio)
+- All graduation queries filter to overall rates (race=99, disability=99, etc.)
+- STEM data joins via COMBOKEY = CONCAT(leaid, school_id)
+- Include row counts and explain what the data shows
+- If no results, suggest adjusting filters
 
 CURRENT CONFIGURATION:
 - Project: {project_id}
 - Dataset: {dataset}
+- State: California
+- Year: 2018
 
-EXAMPLES:
-User: "Show me schools in California"
-You: Use get_school_data(state="CA")
+EXAMPLE QUERIES:
+"Find 5 schools needing grants" → find_high_need_low_tech_spending(limit=5)
+"High-performing high-need schools" → find_high_graduation_low_funding()
+"STEM schools with small classes" → find_strong_stem_low_class_size()
+"Schools with calculus programs" → search_schools_with_stem(stem_course="calculus")
+"All schools in county 6037" → get_school_data(county="6037")
 
-User: "Find five schools with highest low-income students and lowest tech spending"
-You: Use find_high_need_low_tech_spending(limit=5)
-
-User: "Schools with high graduation despite low funding"
-You: Use find_high_graduation_low_funding()
-
-User: "Strong STEM programs with small classes"
-You: Use find_strong_stem_low_class_size()
-
-User: "Compare proficiency rates across districts"
-You: Use query_bigquery with appropriate GROUP BY query
-
-Always respond with clear, actionable data summaries."""
+Always provide clear summaries with key metrics highlighted."""
 
     # Create function tools
     tools = [
         FunctionTool(func=query_bigquery),
         FunctionTool(func=get_school_data),
-        FunctionTool(func=get_test_scores),
-        FunctionTool(func=get_demographics),
-        # Specialized tools for priority questions
+        FunctionTool(func=get_graduation_data),
+        FunctionTool(func=get_district_finance),
+        # Specialized research question tools
         FunctionTool(func=find_high_need_low_tech_spending),
         FunctionTool(func=find_high_graduation_low_funding),
         FunctionTool(func=find_strong_stem_low_class_size),
-        FunctionTool(func=search_education_data)
+        FunctionTool(func=search_schools_with_stem)
     ]
     
     # Create the agent

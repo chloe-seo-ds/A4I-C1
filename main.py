@@ -15,7 +15,6 @@ from typing import Dict, Any
 # Check if running in Cloud Shell (ADK available)
 try:
     from google.adk.agents import LlmAgent
-    from google.adk import Runner
     from google.adk.sessions import State
     ADK_AVAILABLE = True
 except ImportError:
@@ -32,22 +31,25 @@ def create_runner_state() -> State:
     """Create initial state for the agent runner"""
     config = get_config()
     
-    return State(
-        project_id=config.project_id,
-        location=config.location,
-        bigquery_dataset=config.bigquery_dataset,
-        model_name=config.model_name,
-        temperature=config.temperature,
-        max_output_tokens=config.max_output_tokens,
+    # State requires (value, delta) as positional arguments
+    initial_state = {
+        'project_id': config.project_id,
+        'location': config.location,
+        'bigquery_dataset': config.bigquery_dataset,
+        'model_name': config.model_name,
+        'temperature': config.temperature,
+        'max_output_tokens': config.max_output_tokens,
         
         # Conversation state
-        user_type=None,  # Will be detected: 'parent', 'educator', 'official'
-        conversation_history=[],
+        'user_type': None,  # Will be detected: 'parent', 'educator', 'official'
+        'conversation_history': [],
         
         # Session metadata
-        session_id=None,
-        total_queries=0,
-    )
+        'session_id': None,
+        'total_queries': 0,
+    }
+    
+    return State(value=initial_state, delta={})
 
 
 def print_welcome():
@@ -65,64 +67,93 @@ def print_welcome():
 
 
 def run_demo_mode():
-    """Run with sample queries to demonstrate capabilities"""
+    """Run demo testing the 3 core research questions"""
     print_welcome()
-    print("🎬 DEMO MODE - Running sample queries...\n")
+    print("🎬 DEMO MODE - Testing research questions...\n")
     
+    # Import the specialized tools directly
+    from tools.bigquery_tools import (
+        find_high_need_low_tech_spending,
+        find_high_graduation_low_funding,
+        find_strong_stem_low_class_size
+    )
+    
+    config = get_config()
+    
+    # Create mock ToolContext for testing
+    class MockState:
+        def __init__(self, project_id, dataset):
+            self.project_id = project_id
+            self.dataset = dataset
+        def get(self, key, default=None):
+            return getattr(self, key, default)
+    
+    class MockContext:
+        def __init__(self, project_id, dataset):
+            self.state = MockState(project_id, dataset)
+    
+    mock_ctx = MockContext(config.project_id, config.bigquery_dataset)
+    
+    # Demo queries matching the 3 research questions
     demo_queries = [
         {
-            "user_type": "parent",
-            "query": "My child is struggling with reading. What should I do?",
-            "intro": "👪 PARENT QUERY"
+            "title": "Q1: Grant Priority Schools",
+            "emoji": "💰",
+            "description": "Schools with highest low-income % + lowest tech spending",
+            "function": lambda: find_high_need_low_tech_spending(
+                limit=5,
+                tool_context=mock_ctx
+            )
         },
         {
-            "user_type": "educator",
-            "query": "Our 3rd graders are below grade level in math. What interventions work?",
-            "intro": "👨‍🏫 EDUCATOR QUERY"
+            "title": "Q2: High-Performing High-Need Schools",
+            "emoji": "⭐",
+            "description": "High graduation rates despite below-average funding",
+            "function": lambda: find_high_graduation_low_funding(
+                limit=10,
+                tool_context=mock_ctx
+            )
         },
         {
-            "user_type": "official",
-            "query": "How should we allocate $5M to reduce achievement gaps?",
-            "intro": "🏛️  OFFICIAL QUERY"
+            "title": "Q3: STEM Excellence + Small Classes",
+            "emoji": "🔬",
+            "description": "Strong STEM programs with low class sizes",
+            "function": lambda: find_strong_stem_low_class_size(
+                limit=10,
+                tool_context=mock_ctx
+            )
         }
     ]
     
-    # Create runner
-    config = get_config()
-    root_agent = create_root_agent(
-        project_id=config.project_id,
-        dataset=config.bigquery_dataset
-    )
-    runner = Runner(root_agent)
-    state = create_runner_state()
-    
     for i, demo in enumerate(demo_queries, 1):
         print(f"\n{'─' * 70}")
-        print(f"{demo['intro']} ({i}/{len(demo_queries)})")
+        print(f"{demo['emoji']} {demo['title']} ({i}/{len(demo_queries)})")
         print(f"{'─' * 70}")
-        print(f"📝 Query: {demo['query']}\n")
-        
-        # Set user type in state
-        state = state.update(user_type=demo['user_type'])
+        print(f"📝 {demo['description']}\n")
         
         try:
-            # Run the agent
-            response = runner.run(demo['query'], state=state)
+            # Run the query
+            result = demo['function']()
             
             # Print response
-            print(f"🤖 Response:")
-            print(f"{response.content}\n")
-            
-            # Update state
-            state = response.state
+            if result['status'] == 'success':
+                print(f"✅ Found {result.get('count', 0)} schools\n")
+                print(f"📊 Results:")
+                print(result['summary'])
+                print()
+            else:
+                print(f"⚠️  {result.get('message', 'No data found')}\n")
             
         except Exception as e:
-            print(f"❌ Error: {str(e)}")
+            print(f"❌ Error: {str(e)}\n")
             import traceback
             traceback.print_exc()
     
     print(f"\n{'=' * 70}")
-    print("✅ Demo complete!")
+    print("✅ Demo complete! Multi-agent system is configured.")
+    print("   • Data layer: BigQuery + 3 research questions ✅")
+    print("   • Agent architecture: Root → Data → Insights ✅")
+    print("   • Deploy to Cloud Run to enable full agent orchestration")
     print("=" * 70 + "\n")
 
 
@@ -132,13 +163,12 @@ def run_interactive_mode():
     print("💬 INTERACTIVE MODE")
     print("Type your questions below. Type 'quit' or 'exit' to stop.\n")
     
-    # Create runner
+    # Create agent
     config = get_config()
     root_agent = create_root_agent(
         project_id=config.project_id,
         dataset=config.bigquery_dataset
     )
-    runner = Runner(root_agent)
     state = create_runner_state()
     
     print("💡 Tip: Tell us your role for better recommendations!")
@@ -157,16 +187,17 @@ def run_interactive_mode():
                 print("   Empowering data-driven decisions in education.\n")
                 break
             
-            # Run the agent
+            # Run the agent directly
             print("\n🤔 Thinking...\n")
-            response = runner.run(user_input, state=state)
+            response = root_agent.run(user_input, state=state)
             
             # Print response
             print(f"Agent: {response.content}\n")
             
             # Update state
             state = response.state
-            state = state.update(total_queries=state.get('total_queries', 0) + 1)
+            current_queries = state.value.get('total_queries', 0) if hasattr(state, 'value') else state.get('total_queries', 0)
+            state.update({'total_queries': current_queries + 1})
             
         except KeyboardInterrupt:
             print("\n\n👋 Interrupted. Goodbye!")

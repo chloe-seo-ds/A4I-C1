@@ -17,16 +17,16 @@ class AgentConfig:
 
 def get_config() -> AgentConfig:
     """Get configuration from environment variables or defaults"""
-    project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "qwiklabs-gcp-01-12fba4b98ccb")
+    project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "qwiklabs-gcp-04-b5171aa68bec")
     
     if project_id == "your-project-id":
         print("⚠️  Warning: Using default project ID. Set GOOGLE_CLOUD_PROJECT environment variable.")
     
     return AgentConfig(
         project_id=project_id,
-        location=os.getenv("VERTEX_AI_LOCATION", "us-central1"),
-        bigquery_dataset=os.getenv("BIGQUERY_DATASET", "School_agent"),
-        model_name=os.getenv("MODEL_NAME", "gemini-1.5-pro"),
+        location=os.getenv("VERTEX_AI_LOCATION", "us-west1"),
+        bigquery_dataset=os.getenv("BIGQUERY_DATASET", "education_data"),
+        model_name=os.getenv("MODEL_NAME", "gemini-2.0-flash-exp"),
         temperature=float(os.getenv("TEMPERATURE", "0.7")),
         max_output_tokens=int(os.getenv("MAX_OUTPUT_TOKENS", "2048"))
     )

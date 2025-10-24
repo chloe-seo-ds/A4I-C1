@@ -123,9 +123,16 @@ python main.py
 
 ## 📊 Data Sources
 
-- **Data.gov**: https://catalog.data.gov/dataset?groups=education2168
-- **Education Data Portal**: https://educationdata.urban.org/
-- **NCES**: https://nces.ed.gov/
+**BigQuery Dataset:** `education_data` (California 2018)
+- **CCD Directory** (10,000 schools): Demographics, enrollment, teachers
+- **Graduation Rates** (788 high schools): EdFacts graduation data
+- **District Finance** (2,198 districts): Per-pupil spending, expenditures
+- **STEM Courses** (12 tables): AP, Calculus, Physics, Chemistry, Biology, etc.
+
+**Join Keys:**
+- Schools → Districts: `leaid`
+- Schools → Graduation: `ncessch`
+- Schools → STEM: `CONCAT(leaid, school_id) = COMBOKEY`
 
 ## 🤖 Agent Roles
 

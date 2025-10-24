@@ -134,16 +134,13 @@ IMPORTANT:
 - Track what changed and why
 - Ensure critique feedback is actually incorporated"""
 
-    # Create sub-agents
-    recommender_agent = create_recommender_agent()
-    critique_agent = create_critique_agent()
-    
-    # Create Insights agent with sub-agents as tools
+    # Create Insights agent (simplified - no sub-agents for now)
+    # TODO: Re-enable sub-agent orchestration once ADK agent-as-tool API is stable
     agent = LlmAgent(
         name="InsightsAgent",
         model="gemini-2.0-flash-exp",
         instruction=instruction,
-        tools=[recommender_agent, critique_agent]  # Use agents as tools!
+        tools=[]  # No sub-agents for now - agent will generate insights directly
     )
     
     return agent
