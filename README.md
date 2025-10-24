@@ -9,6 +9,8 @@ An AI-powered conversational agent system that helps parents, educators, and pol
 - 📝 **Executive Summaries**: Direct answers with school names and key metrics upfront
 - 📋 **Detailed Data Tables**: Sortable, comprehensive school data
 - 🎨 **Modern UI**: Beautiful, responsive interface with role-based interactions
+- 📎 **Multimodal Inputs**: Upload images (school photos, documents) and PDFs (reports, policies) for AI analysis
+- 🎯 **Drag & Drop**: Easy file uploads with preview and validation
 
 ## 🎯 Project Overview
 
@@ -238,10 +240,26 @@ A4I-C1/
 
 ## 🔮 Stretch Goals
 
-- [ ] Interactive visualizations (charts, maps)
-- [ ] Multimodal inputs (images, video)
+- [x] Interactive visualizations (charts, maps)
+- [x] Multimodal inputs (images, PDFs)
 - [ ] Predictive analytics
-- [ ] Mobile-friendly interface
+
+## 📎 Multimodal Usage
+
+The chat interface supports uploading images and PDFs:
+
+**Upload Methods:**
+1. Click the 📎 attach button
+2. Drag and drop files onto the input area
+
+**Supported Files:**
+- **Images**: JPG, PNG, GIF, WebP (max 10MB)
+- **PDFs**: Reports, policies, test scores (max 20MB)
+
+**Example Use Cases:**
+- Upload a school report card and ask "What are the key findings?"
+- Share a facility photo and ask "How does this compare to other schools?"
+- Upload district data charts and request analysis
 
 ## 🙏 Acknowledgments
 
