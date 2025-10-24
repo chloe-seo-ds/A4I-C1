@@ -6,7 +6,7 @@ Runs multi-agent system directly
 
 import os
 from typing import Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -93,15 +93,24 @@ async def health():
     }
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(message: ChatMessage):
+async def chat(
+    message: str = Form(...),
+    user_role: str = Form(...),
+    file: Optional[UploadFile] = File(None)
+):
     """
     Chat endpoint - runs multi-agent system to answer education queries
+    Supports multimodal inputs: text + optional image/PDF file
     """
     try:
         # Initialize system on first request
         initialize_system()
         
-        print(f"\n📨 User ({message.user_role}): {message.message}")
+        file_info = ""
+        if file:
+            file_info = f" + 📎 {file.filename}"
+        
+        print(f"\n📨 User ({user_role}): {message}{file_info}")
         print(f"   Processing with Education Insights Agent System...")
 
         # Import the BigQuery tools
@@ -129,7 +138,7 @@ async def chat(message: ChatMessage):
         tool_context = MockContext()
         
         # Analyze the query and call appropriate tool
-        query_lower = message.message.lower()
+        query_lower = message.lower()
         response_text = None
         query_type = None
         data = []
@@ -212,24 +221,59 @@ async def chat(message: ChatMessage):
                 
                 client = genai.Client(api_key=api_key, vertexai=False)
                 
+                # Process uploaded file if present
+                file_bytes = None
+                file_mime_type = None
+                if file:
+                    file_bytes = await file.read()
+                    file_size_mb = len(file_bytes) / (1024 * 1024)
+                    
+                    # Check file size limits
+                    if file.content_type.startswith('image/') and file_size_mb > 10:
+                        raise HTTPException(status_code=400, detail="Image file too large. Max 10MB.")
+                    elif file.content_type == 'application/pdf' and file_size_mb > 20:
+                        raise HTTPException(status_code=400, detail="PDF file too large. Max 20MB.")
+                    
+                    # Store file info for Gemini
+                    file_mime_type = file.content_type
+                    print(f"   → File processed: {file.filename} ({file_size_mb:.2f}MB, {file_mime_type})")
+                
                 # Create a contextualized prompt for the role
-                system_instruction = f"""You are an education expert assistant helping {message.user_role}s make informed decisions about schools and education.
+                file_context = ""
+                if file:
+                    file_context = f"\n\nThe user has attached a file ({file.filename}). Please analyze it in the context of their question."
+                
+                system_instruction = f"""You are an education expert assistant helping {user_role}s make informed decisions about schools and education.
 
 Provide helpful, practical advice based on education best practices. When asked for school recommendations, provide SPECIFIC school names, locations, and details whenever possible.
 
 Answer questions directly with concrete recommendations and examples. Be specific and actionable.
 
-Keep responses clear, detailed, and tailored to a {message.user_role}'s perspective.
+Keep responses clear, detailed, and tailored to a {user_role}'s perspective.
 
 Note: For data-driven comparisons about California schools (2018 data), I can also provide detailed analytics about:
 - Schools with high low-income students and low tech spending
 - Schools with high graduation rates despite low funding
-- Schools with strong STEM programs and small class sizes"""
+- Schools with strong STEM programs and small class sizes{file_context}"""
+                
+                # Build contents for Gemini (multimodal if file present)
+                if file_bytes and file_mime_type:
+                    # Multimodal: Create proper content structure
+                    import google.genai.types as types
+                    
+                    # Create parts correctly
+                    text_part = types.Part(text=f"{system_instruction}\n\nUser Question: {message}")
+                    image_part = types.Part(inline_data=types.Blob(mime_type=file_mime_type, data=file_bytes))
+                    
+                    contents = [text_part, image_part]
+                else:
+                    # Text only
+                    contents = f"{system_instruction}\n\nUser Question: {message}"
                 
                 # Generate response using gemini-2.5-flash
                 response = client.models.generate_content(
                     model='gemini-2.5-flash',
-                    contents=f"{system_instruction}\n\nUser Question: {message.message}"
+                    contents=contents
                 )
                 
                 agent_response = response.text
@@ -296,7 +340,7 @@ Note: For data-driven comparisons about California schools (2018 data), I can al
 <p style="color: #581c87;">• Schools with strong STEM programs and low class sizes</p>
 </div>
 
-<p style="margin-top: 20px; color: #4b5563;"><strong>Your question:</strong> "{message.message}"</p>
+<p style="margin-top: 20px; color: #4b5563;"><strong>Your question:</strong> "{message}"</p>
 <p style="color: #ef4444; margin-top: 10px;">Error: {str(e)}</p>
 </div>"""
         
@@ -304,7 +348,7 @@ Note: For data-driven comparisons about California schools (2018 data), I can al
         
         return ChatResponse(
             response=response_text,
-            user_type=message.user_role,
+            user_type=user_role,
             status="success"
         )
         
