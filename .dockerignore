@@ -1,0 +1,63 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data files (not needed in Cloud Run)
+data/
+*.csv
+*.xlsx
+*.parquet
+
+# Secrets
+secrets/
+*.key
+*.pem
+.env
+.env.*
+set_env.sh
+
+# Development
+*.md
+README.md
+.vscode/
+.idea/
+*.log
+*.tmp
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Test files
+tests/
+test_*.py
+*_test.py
+
+# macOS
+.DS_Store
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/
+
+# Virtual environments (shouldn't be in repo, but just in case)
+venv/
+env/
+ENV/
+.venv/
+

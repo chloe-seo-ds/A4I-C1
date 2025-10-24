@@ -1,11 +1,43 @@
 """
-ADK-Compatible BigQuery Tool Functions
-Uses ToolContext for state management and authentication
+BigQuery Tool Functions for Education Data
+Uses real tables: ccd_directory, graduation_rates, district_finance, stem_*
 """
 from typing import Dict, Any, List, Optional
 from google.cloud import bigquery
 from google.adk.tools import ToolContext
-import pandas as pd
+import google.auth
+import subprocess
+import os
+
+
+def _get_bigquery_client(project_id: str):
+    """
+    Get BigQuery client with proper authentication.
+    Falls back to multiple auth methods to ensure it works.
+    """
+    try:
+        # Try using gcloud access token (works with active gcloud auth)
+        try:
+            result = subprocess.run(
+                ['gcloud', 'auth', 'print-access-token'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            access_token = result.stdout.strip()
+            
+            from google.auth.transport.requests import Request
+            from google.oauth2.credentials import Credentials
+            
+            creds = Credentials(token=access_token)
+            return bigquery.Client(project=project_id, credentials=creds)
+        except:
+            # Fallback to default credentials
+            credentials, _ = google.auth.default()
+            return bigquery.Client(project=project_id, credentials=credentials)
+    except Exception as e:
+        # Last resort - try without explicit credentials
+        return bigquery.Client(project=project_id)
 
 
 def query_bigquery(
@@ -15,21 +47,14 @@ def query_bigquery(
     """
     Execute a SQL query against BigQuery and return results.
     
-    Use this tool to retrieve education data from BigQuery datasets.
-    The query should be a valid BigQuery SQL statement.
-    
     Args:
         sql_query: A valid BigQuery SQL query string
+        tool_context: ADK tool context for state management
         
     Returns:
         Dictionary with 'status', 'data' (list of dicts), and 'row_count'
-        
-    Examples:
-        - "SELECT * FROM schools WHERE state = 'CA' LIMIT 10"
-        - "SELECT district, AVG(score) as avg_score FROM test_scores GROUP BY district"
     """
     try:
-        # Get project info from context state
         project_id = tool_context.state.get("project_id")
         if not project_id:
             return {
@@ -38,17 +63,15 @@ def query_bigquery(
                 "data": []
             }
         
-        # Initialize BigQuery client
-        client = bigquery.Client(project=project_id)
-        
-        # Execute query
+        # Get authenticated client
+        client = _get_bigquery_client(project_id)
         query_job = client.query(sql_query)
         results = query_job.result()
         
         # Convert to list of dicts
         rows = [dict(row) for row in results]
         
-        # Store last query in state
+        # Store in state
         tool_context.state["last_bq_query"] = sql_query
         tool_context.state["last_bq_row_count"] = len(rows)
         
@@ -69,50 +92,59 @@ def query_bigquery(
 
 
 def get_school_data(
-    state: Optional[str] = None,
-    district: Optional[str] = None,
+    state: Optional[str] = "CA",
+    county: Optional[str] = None,
+    school_level: Optional[int] = None,
     limit: int = 100,
     tool_context: ToolContext = None
 ) -> Dict[str, Any]:
     """
-    Retrieve school information from the education dataset.
-    
-    Use this tool to get basic school data. You can filter by state and/or district.
+    Retrieve school information from CCD directory.
     
     Args:
-        state: Optional 2-letter state code (e.g., 'CA', 'NY')
-        district: Optional district name
-        limit: Maximum number of schools to return (default: 100)
+        state: State location (default: 'CA')
+        county: Optional county code filter
+        school_level: Optional school level (1=Elementary, 2=Middle, 3=High, 4=Other)
+        limit: Maximum number of schools to return
+        tool_context: ADK tool context
         
     Returns:
-        Dictionary with school data including name, location, enrollment, etc.
+        Dictionary with school data
     """
     try:
         project_id = tool_context.state.get("project_id")
         dataset = tool_context.state.get("bigquery_dataset", "education_data")
         
-        # Build query - using schooltable
         query = f"""
         SELECT 
-            School_Name as school_name,
-            District_Name as district,
-            State as state,
-            Enroll_Total as enrollment,
-            School_Level as school_level,
-            Latitude,
-            Longitude
-        FROM `{project_id}.{dataset}.schooltable`
-        WHERE 1=1
+            ncessch,
+            school_name,
+            leaid,
+            lea_name,
+            city_location,
+            state_location,
+            county_code,
+            school_level,
+            enrollment,
+            teachers_fte,
+            free_lunch,
+            charter,
+            latitude,
+            longitude,
+            ROUND(free_lunch / NULLIF(enrollment, 0) * 100, 1) as low_income_pct,
+            ROUND(enrollment / NULLIF(teachers_fte, 0), 1) as student_teacher_ratio
+        FROM `{project_id}.{dataset}.ccd_directory`
+        WHERE state_location = '{state}'
+          AND enrollment > 0
         """
         
-        if state:
-            query += f" AND state = '{state}'"
-        if district:
-            query += f" AND district = '{district}'"
+        if county:
+            query += f" AND county_code = '{county}'"
+        if school_level:
+            query += f" AND school_level = {school_level}"
             
-        query += f" LIMIT {limit}"
+        query += f" ORDER BY enrollment DESC LIMIT {limit}"
         
-        # Use the query_bigquery function
         return query_bigquery(query, tool_context)
         
     except Exception as e:
@@ -123,26 +155,21 @@ def get_school_data(
         }
 
 
-def get_test_scores(
-    state: Optional[str] = None,
-    subject: Optional[str] = None,
-    year: Optional[int] = None,
+def get_graduation_data(
+    min_graduation_rate: Optional[float] = None,
     limit: int = 100,
     tool_context: ToolContext = None
 ) -> Dict[str, Any]:
     """
-    Retrieve standardized test score data.
-    
-    Use this tool to get test performance metrics. Filter by state, subject, or year.
+    Retrieve graduation rate data for California high schools.
     
     Args:
-        state: Optional 2-letter state code
-        subject: Optional subject name (e.g., 'Math', 'Reading')
-        year: Optional year (e.g., 2023)
+        min_graduation_rate: Optional minimum graduation rate filter
         limit: Maximum number of records to return
+        tool_context: ADK tool context
         
     Returns:
-        Dictionary with test score data including school, scores, and demographics
+        Dictionary with graduation data
     """
     try:
         project_id = tool_context.state.get("project_id")
@@ -150,53 +177,52 @@ def get_test_scores(
         
         query = f"""
         SELECT 
-            School_Code as school_code,
-            Test_Year as year,
-            Grade as grade,
-            Test_ID as subject,
-            Mean_Scale_Score as avg_score,
-            Percentage_Standard_Met_and_Above as proficiency_rate,
-            Total_Tested_with_Scores_at_Reporting_Level as num_students
-        FROM `{project_id}.{dataset}.CAASP_Test_Scores`
-        WHERE 1=1
+            ncessch,
+            school_name,
+            leaid,
+            lea_name,
+            grad_rate_midpt,
+            grad_rate_low,
+            grad_rate_high,
+            cohort_num
+        FROM `{project_id}.{dataset}.graduation_rates`
+        WHERE race = 99  -- Overall (not by subgroup)
+          AND disability = 99
+          AND econ_disadvantaged = 99
+          AND lep = 99
+          AND homeless = 99
+          AND foster_care = 99
+          AND grad_rate_midpt > 0  -- Exclude suppressed data
         """
         
-        if state:
-            query += f" AND state = '{state}'"
-        if subject:
-            query += f" AND subject = '{subject}'"
-        if year:
-            query += f" AND year = {year}"
+        if min_graduation_rate:
+            query += f" AND grad_rate_midpt >= {min_graduation_rate}"
             
-        query += f" LIMIT {limit}"
+        query += f" ORDER BY grad_rate_midpt DESC LIMIT {limit}"
         
         return query_bigquery(query, tool_context)
         
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Error retrieving test scores: {str(e)}",
+            "message": f"Error retrieving graduation data: {str(e)}",
             "data": []
         }
 
 
-def get_demographics(
-    state: Optional[str] = None,
-    limit: int = 100,
+def get_district_finance(
+    leaid: Optional[str] = None,
     tool_context: ToolContext = None
 ) -> Dict[str, Any]:
     """
-    Retrieve demographic information for schools.
-    
-    Use this tool to get data on student demographics including ethnicity,
-    economic status, and special programs.
+    Retrieve district-level finance data.
     
     Args:
-        state: Optional 2-letter state code
-        limit: Maximum number of records to return
+        leaid: Optional specific district ID to retrieve
+        tool_context: ADK tool context
         
     Returns:
-        Dictionary with demographic data
+        Dictionary with finance data
     """
     try:
         project_id = tool_context.state.get("project_id")
@@ -204,198 +230,222 @@ def get_demographics(
         
         query = f"""
         SELECT 
-            School_Name as school_name,
-            District_Name as district,
-            State as state,
-            Enroll_Total as total_students,
-            Socioeconomically_Disadvantaged_Pct as percent_disadvantaged,
-            English_Learner_Pct as percent_ell,
-            Students_with_Disabilities_Pct as percent_special_ed,
-            Free_Reduced_Meal_Eligible_Pct as percent_free_reduced
-        FROM `{project_id}.{dataset}.schooltable`
-        WHERE 1=1
+            LEAID,
+            NAME as district_name,
+            MEMBERSCH as district_enrollment,
+            per_pupil_total,
+            per_pupil_instruction,
+            per_pupil_support,
+            TOTALEXP as total_expenditure,
+            TCURINST as current_instruction_spending,
+            TCURSSVC as support_services_spending
+        FROM `{project_id}.{dataset}.district_finance`
+        WHERE per_pupil_total > 0
         """
         
-        if state:
-            query += f" AND state = '{state}'"
+        if leaid:
+            query += f" AND LEAID = '{leaid}'"
+        else:
+            query += " LIMIT 100"
             
-        query += f" LIMIT {limit}"
-        
         return query_bigquery(query, tool_context)
         
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Error retrieving demographics: {str(e)}",
+            "message": f"Error retrieving finance data: {str(e)}",
             "data": []
         }
 
 
 def find_high_need_low_tech_spending(
     county: Optional[str] = None,
-    state: Optional[str] = None,
     limit: int = 5,
     tool_context: ToolContext = None
 ) -> Dict[str, Any]:
     """
-    Find schools with highest rate of low-income students and lowest per-pupil technology spending.
+    RESEARCH QUESTION 1:
+    Find schools with highest low-income rate and lowest per-pupil spending.
     
-    This is useful for identifying schools that need priority grant funding for technology.
+    This identifies schools that need priority grant funding.
     
     Args:
-        county: Optional county name to filter by
-        state: Optional state code to filter by
+        county: Optional county code to filter by
         limit: Number of schools to return (default: 5)
+        tool_context: ADK tool context
         
     Returns:
-        Dictionary with schools ranked by need + tech spending gap
+        Dictionary with prioritized schools for grant funding
     """
     try:
         project_id = tool_context.state.get("project_id")
         dataset = tool_context.state.get("bigquery_dataset", "education_data")
         
-        # Try comprehensive table first (has funding data)
         query = f"""
         SELECT 
-            school_name,
-            district,
-            state,
-            county,
-            low_income_pct,
-            tech_spending_per_pupil,
-            total_enrollment,
-            (low_income_pct * 100 - tech_spending_per_pupil) as need_score
-        FROM `{project_id}.{dataset}.synthetic_school_demo_fund_perf`
-        WHERE low_income_pct IS NOT NULL 
-          AND tech_spending_per_pupil IS NOT NULL
+            c.school_name,
+            c.lea_name,
+            c.city_location,
+            c.county_code,
+            c.enrollment,
+            c.free_lunch,
+            ROUND(c.free_lunch / NULLIF(c.enrollment, 0) * 100, 1) as low_income_pct,
+            ROUND(c.enrollment / NULLIF(c.teachers_fte, 0), 1) as student_teacher_ratio,
+            COALESCE(f.per_pupil_total, 0) as per_pupil_total,
+            COALESCE(f.per_pupil_instruction, 0) as per_pupil_instruction,
+            -- Priority score: prioritize high low-income %
+            (c.free_lunch / NULLIF(c.enrollment, 0) * 100) as priority_score
+        FROM `{project_id}.{dataset}.ccd_directory` c
+        LEFT JOIN `{project_id}.{dataset}.district_finance` f
+          ON c.leaid = f.LEAID
+        WHERE c.enrollment >= 100
+          AND c.free_lunch > 0
+          AND (c.free_lunch / NULLIF(c.enrollment, 0) * 100) >= 50
         """
         
         if county:
-            query += f" AND LOWER(county) = LOWER('{county}')"
-        if state:
-            query += f" AND state = '{state}'"
+            query += f" AND c.county_code = '{county}'"
             
         query += f"""
-        ORDER BY low_income_pct DESC, tech_spending_per_pupil ASC
+        ORDER BY priority_score DESC
         LIMIT {limit}
         """
         
         result = query_bigquery(query, tool_context)
         
-        # If no data found, return helpful message
-        if result["status"] == "error" or result["row_count"] == 0:
+        if result.get("status") == "error" or result.get("row_count", 0) == 0:
             return {
-                "status": "partial",
-                "message": "Technology spending data not available in BigQuery. Using demographic data only.",
-                "recommendation": "I can show you schools with high low-income populations. For technology spending data, please provide it or I can search for external sources.",
+                "status": "no_data",
+                "message": "No schools found with complete finance and demographic data.",
                 "data": [],
-                "fallback_query": "high poverty schools technology funding gap"
+                "suggestion": "Try removing county filter or check if finance data exists for this area."
             }
         
+        # Generate summary
+        summary_lines = [f"**Found {result['row_count']} schools with high need:**\n"]
+        for i, school in enumerate(result['data'][:5], 1):
+            summary_lines.append(
+                f"{i}. **{school['school_name']}** - {school['lea_name']}\n"
+                f"   📍 {school['city_location']}, County: {school['county_code']}\n"
+                f"   👥 Enrollment: {int(school['enrollment'])}\n"
+                f"   💰 Low-Income: {school['low_income_pct']}%\n"
+                f"   💵 Per-Pupil Spending: ${int(school['per_pupil_total'])}\n"
+            )
+        
+        result['summary'] = '\n'.join(summary_lines)
         return result
         
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Error finding high-need low-tech schools: {str(e)}",
-            "data": [],
-            "fallback_query": "schools high poverty low technology spending"
+            "message": f"Error finding high-need schools: {str(e)}",
+            "data": []
         }
 
 
 def find_high_graduation_low_funding(
-    state: Optional[str] = None,
-    min_graduation_rate: float = 85.0,
+    min_graduation_rate: float = 75.0,  # Lowered from 85 to 75
+    min_low_income_pct: float = 50.0,   # Changed from max to min, looking for high-need schools
     limit: int = 10,
     tool_context: ToolContext = None
 ) -> Dict[str, Any]:
     """
-    Find schools with high graduation rates despite below-average funding.
+    RESEARCH QUESTION 2:
+    Find schools with high graduation rates despite high poverty (low funding proxy).
     
-    These schools are doing more with less - their program models can be replicated.
+    These are efficient schools whose models can be replicated.
     
     Args:
-        state: Optional state code to filter by
         min_graduation_rate: Minimum graduation rate threshold (default: 85%)
+        max_low_income_pct: Minimum low-income % to indicate high need (default: 70%)
         limit: Number of schools to return
+        tool_context: ADK tool context
         
     Returns:
-        Dictionary with high-performing, efficiently-run schools
+        Dictionary with high-performing, high-need schools
     """
     try:
         project_id = tool_context.state.get("project_id")
         dataset = tool_context.state.get("bigquery_dataset", "education_data")
         
-        # Try comprehensive table (has both funding and performance)
         query = f"""
-        WITH avg_funding AS (
-            SELECT AVG(per_pupil_spending) as avg_spending
-            FROM `{project_id}.{dataset}.synthetic_school_demo_fund_perf`
-            WHERE per_pupil_spending IS NOT NULL
-        )
         SELECT 
-            s.school_name,
-            s.district,
-            s.state,
-            s.graduation_rate,
-            s.per_pupil_spending,
-            a.avg_spending,
-            (s.per_pupil_spending / a.avg_spending) as funding_ratio,
-            s.total_enrollment
-        FROM `{project_id}.{dataset}.synthetic_school_demo_fund_perf` s
-        CROSS JOIN avg_funding a
-        WHERE s.graduation_rate >= {min_graduation_rate}
-          AND s.per_pupil_spending < a.avg_spending
-          AND s.graduation_rate IS NOT NULL
-          AND s.per_pupil_spending IS NOT NULL
-        """
-        
-        if state:
-            query += f" AND s.state = '{state}'"
-            
-        query += f"""
-        ORDER BY s.graduation_rate DESC, s.per_pupil_spending ASC
+            c.school_name,
+            c.lea_name,
+            c.city_location,
+            c.enrollment,
+            ROUND(c.free_lunch / NULLIF(c.enrollment, 0) * 100, 1) as low_income_pct,
+            g.grad_rate_midpt as graduation_rate,
+            g.cohort_num,
+            ROUND(c.enrollment / NULLIF(c.teachers_fte, 0), 1) as student_teacher_ratio,
+            c.charter,
+            f.per_pupil_total,
+            f.per_pupil_instruction
+        FROM `{project_id}.{dataset}.ccd_directory` c
+        INNER JOIN `{project_id}.{dataset}.graduation_rates` g
+          ON c.ncessch = g.ncessch
+        LEFT JOIN `{project_id}.{dataset}.district_finance` f
+          ON c.leaid = f.LEAID
+        WHERE g.grad_rate_midpt >= {min_graduation_rate}
+          AND (c.free_lunch / NULLIF(c.enrollment, 0) * 100) >= {min_low_income_pct}
+          AND c.enrollment >= 100
+          AND g.race = 99
+          AND g.disability = 99
+          AND g.econ_disadvantaged = 99
+          AND g.lep = 99
+          AND g.homeless = 99
+          AND g.foster_care = 99
+        ORDER BY g.grad_rate_midpt DESC, low_income_pct DESC
         LIMIT {limit}
         """
         
         result = query_bigquery(query, tool_context)
         
-        # If no data, provide fallback
-        if result["status"] == "error" or result["row_count"] == 0:
+        if result.get("status") == "error" or result.get("row_count", 0) == 0:
             return {
-                "status": "partial",
-                "message": "Graduation rate and funding data not available in BigQuery.",
-                "recommendation": "Please provide graduation rates and per-pupil funding data, or I can search for schools with efficient program models.",
+                "status": "no_data",
+                "message": f"No schools found with graduation ≥{min_graduation_rate}% and low-income ≥{min_low_income_pct}%.",
                 "data": [],
-                "fallback_query": "high graduation rate schools low funding best practices"
+                "suggestion": "Try lowering thresholds or expanding search criteria."
             }
         
+        # Generate summary
+        summary_lines = [f"**Found {result['row_count']} high-performing high-need schools:**\n"]
+        for i, school in enumerate(result['data'][:10], 1):
+            summary_lines.append(
+                f"{i}. **{school['school_name']}** - {school['lea_name']}\n"
+                f"   📍 {school['city_location']}\n"
+                f"   🎓 Graduation Rate: {school['graduation_rate']}%\n"
+                f"   💰 Low-Income: {school['low_income_pct']}%\n"
+                f"   👥 Enrollment: {int(school['enrollment'])}\n"
+            )
+        
+        result['summary'] = '\n'.join(summary_lines)
         return result
         
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Error finding efficient high-performing schools: {str(e)}",
-            "data": [],
-            "fallback_query": "schools high graduation low funding"
+            "message": f"Error finding high-performing schools: {str(e)}",
+            "data": []
         }
 
 
 def find_strong_stem_low_class_size(
-    state: Optional[str] = None,
-    max_class_size: int = 20,
+    max_student_teacher_ratio: int = 25,  # Increased from 20 to 25
+    school_level: int = 3,  # High schools
     limit: int = 10,
     tool_context: ToolContext = None
 ) -> Dict[str, Any]:
     """
+    RESEARCH QUESTION 3:
     Find schools with strong STEM programs and low class sizes.
     
-    Useful for identifying effective STEM education models.
-    
     Args:
-        state: Optional state code to filter by
-        max_class_size: Maximum average class size (default: 20)
+        max_student_teacher_ratio: Maximum student-teacher ratio (default: 20)
+        school_level: School level filter (3=High School)
         limit: Number of schools to return
+        tool_context: ADK tool context
         
     Returns:
         Dictionary with STEM-strong schools with favorable class sizes
@@ -404,77 +454,135 @@ def find_strong_stem_low_class_size(
         project_id = tool_context.state.get("project_id")
         dataset = tool_context.state.get("bigquery_dataset", "education_data")
         
-        # Try comprehensive table
+        # Query with STEM data joined (using AP courses as STEM indicator)
         query = f"""
         SELECT 
-            school_name,
-            district,
-            state,
-            stem_program_score,
-            avg_class_size,
-            student_teacher_ratio,
-            total_enrollment,
-            stem_courses_offered
-        FROM `{project_id}.{dataset}.synthetic_school_demo_fund_perf`
-        WHERE avg_class_size <= {max_class_size}
-          AND stem_program_score IS NOT NULL
-          AND avg_class_size IS NOT NULL
-        """
-        
-        if state:
-            query += f" AND state = '{state}'"
-            
-        query += f"""
-        ORDER BY stem_program_score DESC, avg_class_size ASC
+            c.school_name,
+            c.lea_name,
+            c.city_location,
+            c.enrollment,
+            ROUND(c.enrollment / NULLIF(c.teachers_fte, 0), 1) as student_teacher_ratio,
+            c.school_level,
+            c.charter,
+            ROUND(c.free_lunch / NULLIF(c.enrollment, 0) * 100, 1) as low_income_pct,
+            ap.SCH_APCOURSES as ap_courses,
+            COALESCE(ap.TOT_APENR_M, 0) + COALESCE(ap.TOT_APENR_F, 0) as total_ap_enrollment
+        FROM `{project_id}.{dataset}.ccd_directory` c
+        LEFT JOIN `{project_id}.{dataset}.stem_advanced_placement` ap
+          ON CONCAT(c.leaid, c.school_id) = ap.COMBOKEY
+        WHERE c.enrollment >= 100
+          AND c.teachers_fte > 0
+          AND (c.enrollment / c.teachers_fte) <= {max_student_teacher_ratio}
+          AND c.school_level = {school_level}
+          AND COALESCE(ap.SCH_APCOURSES, 0) >= 0  -- Show all schools, prefer those with AP
+        ORDER BY COALESCE(ap.SCH_APCOURSES, 0) DESC, student_teacher_ratio ASC
         LIMIT {limit}
         """
         
         result = query_bigquery(query, tool_context)
         
-        # If no data, provide fallback
-        if result["status"] == "error" or result["row_count"] == 0:
+        if result.get("status") == "error" or result.get("row_count", 0) == 0:
             return {
-                "status": "partial",
-                "message": "STEM program and class size data not available in BigQuery.",
-                "recommendation": "Please provide information about STEM programs and class sizes, or I can search for schools with strong STEM reputations.",
+                "status": "no_data",
+                "message": f"No schools found with student-teacher ratio ≤{max_student_teacher_ratio} and STEM programs.",
                 "data": [],
-                "fallback_query": "schools strong STEM programs small class sizes"
+                "suggestion": "Try increasing max_student_teacher_ratio or removing STEM requirement."
             }
         
+        # Generate summary
+        summary_lines = [f"**Found {result['row_count']} schools with STEM programs and favorable class sizes:**\n"]
+        for i, school in enumerate(result['data'][:10], 1):
+            ap_courses = school.get('ap_courses', 0) or 0
+            summary_lines.append(
+                f"{i}. **{school['school_name']}** - {school['lea_name']}\n"
+                f"   📍 {school['city_location']}\n"
+                f"   📚 Student-Teacher Ratio: {school['student_teacher_ratio']}\n"
+                f"   🔬 AP Courses Offered: {ap_courses}\n"
+                f"   👥 Enrollment: {int(school['enrollment'])}\n"
+            )
+        
+        result['summary'] = '\n'.join(summary_lines)
         return result
         
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Error finding STEM schools with low class sizes: {str(e)}",
-            "data": [],
-            "fallback_query": "schools STEM programs low student teacher ratio"
+            "message": f"Error finding STEM schools: {str(e)}",
+            "data": []
         }
 
 
-def search_education_data(
-    query: str,
+def search_schools_with_stem(
+    stem_course: str = "ap",  # Options: ap, calculus, physics, chemistry, biology
+    min_enrollment: int = 10,
     tool_context: ToolContext = None
 ) -> Dict[str, Any]:
     """
-    Search for education data when BigQuery doesn't have the needed information.
-    
-    This tool provides general guidance and asks the user for specific data.
+    Search for schools offering specific STEM courses.
     
     Args:
-        query: Description of what data is needed
+        stem_course: Type of STEM course (ap, calculus, physics, chemistry, biology)
+        min_enrollment: Minimum student enrollment in the course
+        tool_context: ADK tool context
         
     Returns:
-        Dictionary with guidance on how to provide the data
+        Dictionary with schools offering the specified STEM course
     """
-    return {
-        "status": "needs_input",
-        "message": f"I don't have data for: {query}",
-        "request_to_user": f"To help you with '{query}', I need additional information. Could you provide:\n"
-                          f"- Specific school names or districts you're interested in\n"
-                          f"- Any data you have about {query}\n"
-                          f"- Or I can search online sources for general trends and best practices in this area.\n\n"
-                          f"Would you like me to provide general guidance based on education research instead?",
-        "general_guidance": True
-    }
-
+    try:
+        project_id = tool_context.state.get("project_id")
+        dataset = tool_context.state.get("bigquery_dataset", "education_data")
+        
+        # Map course name to table
+        course_tables = {
+            "ap": "stem_advanced_placement",
+            "calculus": "stem_calculus",
+            "physics": "stem_physics",
+            "chemistry": "stem_chemistry",
+            "biology": "stem_biology"
+        }
+        
+        if stem_course not in course_tables:
+            return {
+                "status": "error",
+                "message": f"Invalid STEM course. Choose from: {list(course_tables.keys())}",
+                "data": []
+            }
+        
+        table_name = course_tables[stem_course]
+        
+        # Different enrollment columns for different courses
+        if stem_course == "ap":
+            enrollment_col = "TOT_APENR_M + TOT_APENR_F"
+        elif stem_course == "calculus":
+            enrollment_col = "SCH_ENRL_CALC_M + SCH_ENRL_CALC_F"
+        elif stem_course == "physics":
+            enrollment_col = "SCH_ENR_PHYS_M + SCH_ENR_PHYS_F"
+        elif stem_course == "chemistry":
+            enrollment_col = "SCH_ENR_CHEM_M + SCH_ENR_CHEM_F"
+        elif stem_course == "biology":
+            enrollment_col = "SCH_ENR_BIO_M + SCH_ENR_BIO_F"
+        
+        query = f"""
+        SELECT 
+            c.school_name,
+            c.lea_name,
+            c.city_location,
+            c.enrollment as school_enrollment,
+            ({enrollment_col}) as course_enrollment,
+            ROUND(c.enrollment / NULLIF(c.teachers_fte, 0), 1) as student_teacher_ratio
+        FROM `{project_id}.{dataset}.ccd_directory` c
+        INNER JOIN `{project_id}.{dataset}.{table_name}` stem
+          ON CONCAT(c.leaid, c.school_id) = stem.COMBOKEY
+        WHERE ({enrollment_col}) >= {min_enrollment}
+        ORDER BY course_enrollment DESC
+        LIMIT 50
+        """
+        
+        return query_bigquery(query, tool_context)
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error searching STEM courses: {str(e)}",
+            "data": []
+        }

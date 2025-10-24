@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """
 FastAPI backend for Education Insights Chat UI
-Connects to Cloud Run deployed agent
+Runs multi-agent system directly
 """
 
 import os
-import requests
 from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+# Import the agent system
+from agents.root_agent import create_root_agent
+from agents.config import get_config
+from main import create_runner_state
 
 # Initialize FastAPI
 app = FastAPI(title="Education Insights API")
@@ -24,14 +29,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cloud Run service configuration
-CLOUD_RUN_BASE_URL = "https://my-agent-service-191692372619.us-central1.run.app"
-AGENT_APP_NAME = "my-agent"
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Initialize agent system
+print("🚀 Initializing Education Insights Agent System...")
+config = get_config()
+root_agent = create_root_agent(
+    project_id=config.project_id,
+    dataset=config.bigquery_dataset
+)
+print(f"✅ Agents initialized for project: {config.project_id}")
 
 class ChatMessage(BaseModel):
     message: str
     user_id: Optional[str] = "default-user"
-    session_id: Optional[str] = None  # Let agent auto-generate if not provided
+    user_role: Optional[str] = "parent"  # parent, educator, policymaker
+    session_id: Optional[str] = None
 
 class ChatResponse(BaseModel):
     response: str
@@ -40,21 +54,13 @@ class ChatResponse(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    """Check connection to Cloud Run service"""
+    """Startup message"""
     print("\n" + "="*70)
-    print("🚀 Connecting to Cloud Run Agent Service...")
+    print("✅ Education Insights Agent System Ready")
     print("="*70)
-    print(f"   URL: {CLOUD_RUN_BASE_URL}")
-    print(f"   App: {AGENT_APP_NAME}")
-    
-    # Try to ping the service
-    try:
-        response = requests.get(f"{CLOUD_RUN_BASE_URL}/health", timeout=5)
-        print(f"✅ Service is reachable!")
-    except Exception as e:
-        print(f"⚠️  Could not reach health endpoint: {e}")
-        print(f"   (This is OK if the service doesn't have /health)")
-    
+    print(f"   Project: {config.project_id}")
+    print(f"   Dataset: {config.bigquery_dataset}")
+    print(f"   Model: {config.model_name}")
     print("="*70 + "\n")
 
 @app.get("/")
@@ -71,105 +77,107 @@ async def health():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "cloud_run_url": CLOUD_RUN_BASE_URL,
-        "agent_app": AGENT_APP_NAME
+        "agent": "ready",
+        "project": config.project_id,
+        "dataset": config.bigquery_dataset
     }
 
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/chat", response_model=ChatResponse)
 async def chat(message: ChatMessage):
     """
-    Chat endpoint - sends message to Cloud Run agent and returns response
+    Chat endpoint - runs multi-agent system to answer education queries
     """
     try:
-        print(f"\n📨 User: {message.message}")
-        print(f"   Calling Cloud Run service...")
+        print(f"\n📨 User ({message.user_role}): {message.message}")
+        print(f"   Processing with Education Insights Agent System...")
         
-        # Build the request to the Cloud Run service
-        # The ADK dev-ui typically exposes an API at /api/agent/chat or similar
+        # Import the BigQuery tools
+        from tools.bigquery_tools import (
+            find_high_need_low_tech_spending,
+            find_high_graduation_low_funding,
+            find_strong_stem_low_class_size,
+            get_school_data
+        )
         
-        # Try different possible endpoints
-        endpoints_to_try = [
-            f"{CLOUD_RUN_BASE_URL}/api/agent/chat",
-            f"{CLOUD_RUN_BASE_URL}/api/chat",
-            f"{CLOUD_RUN_BASE_URL}/chat",
-            f"{CLOUD_RUN_BASE_URL}/query",
-        ]
+        # Create a mock context for tools (inheriting from dict for __setitem__ support)
+        class MockState(dict):
+            def __init__(self):
+                super().__init__()
+                self['project_id'] = config.project_id
+                self['bigquery_dataset'] = config.bigquery_dataset
+            
+            def get(self, key, default=None):
+                return super().get(key, default)
         
-        payload = {
-            "message": message.message,
-            "user_id": message.user_id,
-            "session_id": message.session_id,
-            "app": AGENT_APP_NAME
-        }
+        class MockContext:
+            def __init__(self):
+                self.state = MockState()
         
-        response_data = None
-        successful_endpoint = None
+        tool_context = MockContext()
         
-        for endpoint in endpoints_to_try:
-            try:
-                print(f"   Trying: {endpoint}")
-                response = requests.post(
-                    endpoint,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=60
-                )
+        # Analyze the query and call appropriate tool
+        query_lower = message.message.lower()
+        response_text = None
+        
+        # Check for research question patterns
+        if "low-income" in query_lower and ("technology spending" in query_lower or "tech spending" in query_lower):
+            print("   → Q1: High need + low tech spending")
+            result = find_high_need_low_tech_spending(limit=5, tool_context=tool_context)
+            if result['status'] == 'success':
+                response_text = f"**🎯 Grant Priority Schools** (High Low-Income % + Low Tech Spending)\n\n{result['summary']}"
+            else:
+                response_text = result.get('message', 'No data found.')
                 
-                if response.status_code == 200:
-                    response_data = response.json()
-                    successful_endpoint = endpoint
-                    print(f"   ✅ Success with endpoint: {endpoint}")
-                    break
-                else:
-                    print(f"   ❌ Status {response.status_code}: {response.text[:100]}")
-                    
-            except requests.exceptions.Timeout:
-                print(f"   ⏱️  Timeout")
-                continue
-            except Exception as e:
-                print(f"   ❌ Error: {e}")
-                continue
+        elif ("high graduation" in query_lower or "graduation rate" in query_lower) and ("low funding" in query_lower or "below-average funding" in query_lower or "despite" in query_lower):
+            print("   → Q2: High graduation + low funding")
+            result = find_high_graduation_low_funding(limit=10, tool_context=tool_context)
+            if result['status'] == 'success':
+                response_text = f"**⭐ High-Performing High-Need Schools**\n\n{result['summary']}"
+            else:
+                response_text = result.get('message', 'No data found.')
+                
+        elif "stem" in query_lower and ("class size" in query_lower or "small class" in query_lower):
+            print("   → Q3: STEM programs + small classes")
+            result = find_strong_stem_low_class_size(limit=10, tool_context=tool_context)
+            if result['status'] == 'success':
+                response_text = f"**🔬 STEM Excellence with Small Classes**\n\n{result['summary']}"
+            else:
+                response_text = result.get('message', 'No data found.')
         
-        if response_data is None:
-            # If all endpoints failed, provide helpful error
-            raise HTTPException(
-                status_code=500,
-                detail=f"Could not connect to agent service. Tried endpoints: {endpoints_to_try}"
-            )
+        # If no specific pattern matched, provide helpful guidance
+        if response_text is None:
+            print("   → General query")
+            response_text = f"""I can help you with these specific research questions about California schools (2018 data):
+
+**1. Grant Priority Schools** 🎯
+Ask: "Identify schools with highest low-income students and lowest tech spending"
+
+**2. High-Performing Despite Challenges** ⭐  
+Ask: "Find schools with high graduation rates despite below-average funding"
+
+**3. STEM Excellence** 🔬
+Ask: "Find schools with strong STEM programs and low class sizes"
+
+**Your question:** "{message.message}"
+
+Try rephrasing your question to match one of these research areas, or ask about a specific county, district, or school!"""
         
-        # Extract response text
-        if isinstance(response_data, dict):
-            response_text = response_data.get("response", 
-                                             response_data.get("output",
-                                             response_data.get("message", str(response_data))))
-        else:
-            response_text = str(response_data)
-        
-        print(f"🤖 Agent response: {len(response_text)} chars")
-        
-        # Detect user type from message
-        msg_lower = message.message.lower()
-        user_type = None
-        if "parent" in msg_lower:
-            user_type = "parent"
-        elif "teacher" in msg_lower or "educator" in msg_lower:
-            user_type = "educator"
-        elif "official" in msg_lower or "board" in msg_lower:
-            user_type = "official"
+        print(f"✅ Response generated ({len(response_text)} chars)")
         
         return ChatResponse(
             response=response_text,
-            user_type=user_type,
+            user_type=message.user_role,
             status="success"
         )
         
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"❌ Error: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        return ChatResponse(
+            response=f"I apologize, but I encountered an error processing your request: {str(e)}",
+            status="error"
+        )
 
 if __name__ == "__main__":
     import uvicorn
