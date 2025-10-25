@@ -5,7 +5,7 @@ Runs multi-agent system directly
 """
 
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
@@ -154,7 +154,7 @@ async def chat(
                 state_averages = result.get('state_averages', {})
                 # Use the response formatter
                 formatted = format_response_with_visualizations(
-                    query=message.message,
+                    query=message,
                     data=data,
                     query_type=query_type,
                     maps_api_key=maps_api_key,
@@ -174,7 +174,7 @@ async def chat(
                 state_averages = result.get('state_averages', {})
                 # Use the response formatter
                 formatted = format_response_with_visualizations(
-                    query=message.message,
+                    query=message,
                     data=data,
                     query_type=query_type,
                     maps_api_key=maps_api_key,
@@ -194,7 +194,7 @@ async def chat(
                 state_averages = result.get('state_averages', {})
                 # Use the response formatter
                 formatted = format_response_with_visualizations(
-                    query=message.message,
+                    query=message,
                     data=data,
                     query_type=query_type,
                     maps_api_key=maps_api_key,
@@ -360,6 +360,520 @@ Note: For data-driven comparisons about California schools (2018 data), I can al
             response=f"I apologize, but I encountered an error processing your request: {str(e)}",
             status="error"
         )
+
+@app.post("/match_schools")
+async def match_schools_endpoint(
+    message: str = Form(None),
+    file: Optional[UploadFile] = File(None)
+):
+    """
+    School Match Engine endpoint for K-12 school choice.
+    
+    Parents can:
+    1. Upload documents (report cards, IEPs) OR
+    2. Provide text description of their child
+    
+    Returns: Top 10 matched schools with scores and application strategy
+    """
+    try:
+        # Import the school matching tools
+        from mcp_servers.tools.student_profile import create_student_profile
+        from mcp_servers.tools.school_matcher import (
+            match_schools,
+            rank_schools,
+            generate_school_recommendations
+        )
+        from mcp_servers.tools.school_enrichment import enrich_multiple_schools
+        
+        print(f"\n🏫 School Match Request")
+        if file:
+            print(f"   📎 File: {file.filename} ({file.content_type})")
+        if message:
+            print(f"   💬 Message: {message[:100]}...")
+        
+        # Get config
+        config_obj = get_config()
+        
+        # Process uploaded file if present
+        file_bytes = None
+        mime_type = None
+        if file:
+            file_bytes = await file.read()
+            mime_type = file.content_type
+            file_size_mb = len(file_bytes) / (1024 * 1024)
+            print(f"   📊 File size: {file_size_mb:.2f}MB")
+            
+            # Validate file size
+            if file_size_mb > 20:
+                raise HTTPException(status_code=400, detail="File too large. Max 20MB.")
+        
+        # Step 1: Create student profile
+        print("   🔍 Creating student profile...")
+        student_profile = create_student_profile(
+            text_input=message if message else None,
+            file_bytes=file_bytes,
+            mime_type=mime_type,
+            api_key=os.getenv("GOOGLE_API_KEY")
+        )
+        
+        if student_profile.get("status") == "error":
+            return {
+                "status": "error",
+                "message": student_profile.get("message", "Failed to create student profile"),
+                "html": f"<div style='padding: 20px; color: #ef4444;'>Error: {student_profile.get('message')}</div>"
+            }
+        
+        print(f"   ✅ Profile created: Grade {student_profile.get('grade_entering', 'unknown')}, {student_profile.get('school_level_name', 'unknown')}")
+        
+        # Step 2: Match schools
+        print("   🔎 Matching schools from BigQuery...")
+        match_result = match_schools(
+            student_profile=student_profile,
+            project_id=config_obj.project_id,
+            dataset=config_obj.bigquery_dataset,
+            limit=20
+        )
+        
+        if match_result.get("status") != "success":
+            return {
+                "status": "error",
+                "message": match_result.get("message", "No schools found"),
+                "html": f"<div style='padding: 20px;'><h3>No Schools Found</h3><p>{match_result.get('message')}</p></div>"
+            }
+        
+        print(f"   ✅ Found {len(match_result['schools'])} schools")
+        
+        # Step 3: Rank schools
+        print("   📊 Ranking schools...")
+        ranked = rank_schools(
+            schools=match_result["schools"],
+            student_profile=student_profile
+        )
+        
+        # Step 4: Enrich schools with detailed information (top 10)
+        print("   🔍 Enriching top 10 schools with tours, deadlines, and program details...")
+        enriched_schools = enrich_multiple_schools(
+            schools=ranked[:10],
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            max_schools=10  # Full enrichment for all top 10
+        )
+        
+        # Step 5: Generate recommendations
+        print("   🎯 Generating recommendations...")
+        recommendations = generate_school_recommendations(
+            ranked_schools=enriched_schools,
+            student_profile=student_profile
+        )
+        
+        print(f"   ✅ Top 10 schools ranked and enriched")
+        
+        # Step 5: Format as compact cards (new layout)
+        html_response = _format_school_matches_compact_cards(recommendations)
+        
+        return {
+            "status": "success",
+            "html": html_response,
+            "data": recommendations,
+            "student_profile": student_profile
+        }
+        
+    except Exception as e:
+        print(f"   ❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "message": str(e),
+            "html": f"<div style='padding: 20px; color: #ef4444;'><h3>Error</h3><p>{str(e)}</p></div>"
+        }
+
+def _format_school_matches_compact_cards(recommendations: Dict[str, Any]) -> str:
+    """
+    Format school matches to match Figma design exactly.
+    """
+    if recommendations.get("status") != "success":
+        return f"<div style='padding: 20px;'><p>{recommendations.get('message', 'No recommendations available')}</p></div>"
+    
+    top_schools = recommendations.get("top_10", [])
+    
+    # Header with gradient text and action button
+    html = f"""
+    <div style="padding: 0; margin: 0;">
+        <!-- Header -->
+        <div style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 1rem;">
+                <div>
+                    <h2 style="font-size: 1.5rem; font-weight: 700; background: linear-gradient(to right, #2563eb, #4f46e5, #7c3aed); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.5rem 0;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" style="flex-shrink: 0;">
+                            <path d="M12 3l1.912 5.813a2 2 0 001.272 1.272L21 12l-5.813 1.912a2 2 0 00-1.272 1.272L12 21l-1.912-5.813a2 2 0 00-1.272-1.272L3 12l5.813-1.912a2 2 0 001.272-1.272L12 3z"></path>
+                        </svg>
+                        Recommended Schools for Your Child
+                    </h2>
+                    <p style="color: #64748b; margin: 0; font-size: 0.875rem;">Based on your description, here are the top {len(top_schools)} matching schools • Includes both public and charter options</p>
+                </div>
+                <button onclick="window.location.reload()" style="padding: 0.625rem 1.25rem; background: white; border: 1px solid #cbd5e1; border-radius: 0.5rem; color: #475569; font-size: 0.875rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; transition: all 0.2s;"
+                        onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    New Search
+                </button>
+            </div>
+        </div>
+
+        <!-- School Cards Grid -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1rem;">
+    """
+    
+    for i, school in enumerate(top_schools, 1):
+        match_score = school.get("match_score", 0)
+        school_id = school.get('ncessch', f'school_{i}')
+        
+        # Determine gradient color (using actual hex values)
+        if match_score >= 90:
+            color1, color2 = "#10b981", "#22c55e"  # emerald to green
+            badge_text = "Match"
+        elif match_score >= 80:
+            color1, color2 = "#3b82f6", "#06b6d4"  # blue to cyan
+            badge_text = "Match"
+        elif match_score >= 70:
+            color1, color2 = "#f59e0b", "#fb923c"  # amber to orange
+            badge_text = "Match"
+        else:
+            color1, color2 = "#ef4444", "#f43f5e"  # red to rose
+            badge_text = "Match"
+        
+        grad_rate = school.get('graduation_rate')
+        grad_display = f"{grad_rate}%" if grad_rate else "N/A"
+        
+        html += f'''
+        <div class="school-card-{school_id}" style="background: white; border-radius: 1rem; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.06); transition: all 0.3s; position: relative; height: 100%;" 
+             onmouseover="this.style.boxShadow='0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'"
+             onmouseout="this.style.boxShadow='0 2px 4px -1px rgba(0, 0, 0, 0.06)'">
+            
+            <!-- Match Score Badge (Top Right) -->
+            <div style="position: absolute; top: 0.75rem; right: 0.75rem; z-index: 10;">
+                <div style="background: linear-gradient(135deg, {color1}, {color2}); color: white; padding: 0.375rem 0.75rem; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2); display: flex; align-items: center; gap: 0.25rem;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                    </svg>
+                    {match_score}% {badge_text}
+                </div>
+            </div>
+
+            <!-- Favorite Button (Top Left) -->
+            <button onclick="toggleFavorite(this)" style="position: absolute; top: 0.75rem; left: 0.75rem; z-index: 10; padding: 0.5rem; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(4px); border: none; border-radius: 9999px; cursor: pointer; box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1); transition: all 0.2s;"
+                    onmouseover="this.style.background='white'; this.style.boxShadow='0 4px 6px -1px rgba(0, 0, 0, 0.15)'"
+                    onmouseout="this.style.background='rgba(255, 255, 255, 0.9)'; this.style.boxShadow='0 2px 4px -1px rgba(0, 0, 0, 0.1)'">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" class="heart-icon">
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                </svg>
+            </button>
+            
+            <!-- Content -->
+            <div style="padding: 3.5rem 1.25rem 1.25rem;">
+                    <div style="margin-bottom: 1rem;">
+                        <h3 style="font-size: 1.125rem; font-weight: 700; color: #0f172a; margin: 0 0 0.5rem 0; line-height: 1.375;">{school.get('school_name', 'Unknown School')}</h3>
+                        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.25rem;">
+                            <span style="background: {'#3b82f6' if school.get('charter') == 1 else '#10b981'}; color: white; padding: 0.125rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600;">
+                                {'CHARTER' if school.get('charter') == 1 else 'PUBLIC'}
+                            </span>
+                            <div style="display: flex; align-items: center; gap: 0.25rem; color: #64748b; font-size: 0.875rem;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                                    <circle cx="12" cy="10" r="3"></circle>
+                                </svg>
+                                {school.get('district_name', 'Unknown District')}
+                            </div>
+                        </div>
+                    </div>
+
+                <!-- Stats Grid -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; padding: 0.75rem 0; border-top: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9; margin-bottom: 1rem;">
+                    <div>
+                        <p style="font-size: 0.75rem; color: #94a3b8; margin: 0 0 0.125rem 0;">Graduation Rate</p>
+                        <p style="font-size: 1.125rem; font-weight: 700; color: #0f172a; margin: 0;">{grad_display}</p>
+                    </div>
+                    <div>
+                        <p style="font-size: 0.75rem; color: #94a3b8; margin: 0 0 0.125rem 0;">Students</p>
+                        <p style="font-size: 1.125rem; font-weight: 700; color: #0f172a; margin: 0;">{int(school.get('enrollment', 0)):,}</p>
+                    </div>
+                    <div>
+                        <p style="font-size: 0.75rem; color: #94a3b8; margin: 0 0 0.125rem 0;">Funding/Student</p>
+                        <p style="font-size: 1rem; font-weight: 700; color: #0f172a; margin: 0;">${int(school.get('per_pupil_total', 0) if school.get('per_pupil_total') else 0):,}</p>
+                    </div>
+                    <div>
+                        <p style="font-size: 0.75rem; color: #94a3b8; margin: 0 0 0.125rem 0;">Low Income</p>
+                        <p style="font-size: 1rem; font-weight: 700; color: #0f172a; margin: 0;">{school.get('low_income_pct', 'N/A')}%</p>
+                    </div>
+                </div>
+
+                <!-- View Details Button -->
+                <button onclick="showSchoolDetails('{school_id}')" 
+                        style="width: 100%; background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); color: white; padding: 0.625rem 1rem; border: none; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.3); transition: all 0.2s;"
+                        onmouseover="this.style.background='linear-gradient(135deg, #1d4ed8 0%, #4338ca 100%)'; this.style.boxShadow='0 10px 15px -3px rgba(37, 99, 235, 0.4)'"
+                        onmouseout="this.style.background='linear-gradient(135deg, #2563eb 0%, #4f46e5 100%)'; this.style.boxShadow='0 4px 6px -1px rgba(37, 99, 235, 0.3)'">
+                    View Details
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                        <polyline points="15 3 21 3 21 9"></polyline>
+                        <line x1="10" y1="14" x2="21" y2="3"></line>
+                    </svg>
+                </button>
+            </div>
+            
+            <!-- Details Section (Hidden by default) -->
+            <div id="details-{school_id}" style="display: none; padding: 1.25rem; border-top: 1px solid #f1f5f9; background: #f8fafc;"></div>
+        </div>
+        '''
+    
+    html += '</div></div>'  # Close grid
+    
+    # Add school data and JavaScript
+    import json
+    schools_json = json.dumps(top_schools, default=str)
+    
+    html += f'''
+    <script>
+        // Set global school data for use by the global functions
+        window.schoolsData = {schools_json};
+    </script>
+    '''
+    
+    return html
+
+def _format_school_matches_html(recommendations: Dict[str, Any]) -> str:
+    """
+    Format school recommendations as beautiful HTML.
+    """
+    if recommendations.get("status") != "success":
+        return f"<div style='padding: 20px;'><p>{recommendations.get('message', 'No recommendations available')}</p></div>"
+    
+    top_schools = recommendations.get("top_10", [])
+    strategy = recommendations.get("application_strategy", {})
+    
+    html = """
+    <div style="padding: 20px; max-width: 1200px; margin: 0 auto;">
+        <h1 style="color: #1f2937; margin-bottom: 10px;">🏫 Your Personalized School Matches</h1>
+        <p style="color: #6b7280; margin-bottom: 30px; font-size: 1.1rem;">
+            Found {count} schools matching your child's profile. Here are your top 10 recommendations:
+        </p>
+    """.format(count=len(top_schools))
+    
+    # Add application strategy box
+    if strategy:
+        html += """
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 style="margin-top: 0; font-size: 1.3rem;">📋 Your Application Strategy</h2>
+            <p style="font-size: 1.05rem; line-height: 1.6;">{approach}</p>
+            <div style="margin-top: 15px;">
+                <strong>Next Steps:</strong>
+                <ul style="margin-top: 10px;">
+        """.format(approach=strategy.get("recommended_approach", ""))
+        
+        for step in strategy.get("next_steps", [])[:4]:
+            html += f"<li style='margin: 8px 0;'>{step}</li>"
+        
+        html += """
+                </ul>
+            </div>
+        </div>
+        """
+    
+    # Add school cards
+    for i, school in enumerate(top_schools, 1):
+        match_score = school.get("match_score", 0)
+        
+        # Determine color based on score
+        if match_score >= 85:
+            color = "#10b981"
+            badge = "🌟 Excellent Match"
+        elif match_score >= 70:
+            color = "#3b82f6"
+            badge = "✅ Good Match"
+        elif match_score >= 50:
+            color = "#f59e0b"
+            badge = "⚠️ Fair Match"
+        else:
+            color = "#6b7280"
+            badge = "💭 Consider"
+        
+        html += f"""
+        <div style="background: white; border-left: 5px solid {color}; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 15px;">
+                <div>
+                    <span style="background: {color}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;">#{i}</span>
+                    <h3 style="margin: 10px 0 5px 0; color: #1f2937; font-size: 1.4rem;">{school.get('school_name', 'Unknown School')}</h3>
+                    <p style="color: #6b7280; margin: 0;">
+                        📍 {school.get('city_location', 'Unknown')}, CA<br>
+                        <span style="font-size: 0.85rem;">District: {school.get('district_name', 'Unknown District')}</span>
+                    </p>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 2rem; font-weight: bold; color: {color};">{match_score}%</div>
+                    <div style="color: {color}; font-size: 0.9rem; font-weight: 600;">{badge}</div>
+                </div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 15px 0; padding: 15px; background: #f9fafb; border-radius: 6px;">
+                <div>
+                    <div style="color: #6b7280; font-size: 0.85rem;">Student-Teacher Ratio</div>
+                    <div style="font-size: 1.1rem; font-weight: 600; color: #1f2937;">{school.get('student_teacher_ratio', 'N/A')}:1</div>
+                </div>
+                <div>
+                    <div style="color: #6b7280; font-size: 0.85rem;">Enrollment</div>
+                    <div style="font-size: 1.1rem; font-weight: 600; color: #1f2937;">{int(school.get('enrollment', 0))} students</div>
+                </div>
+        """
+        
+        # Add graduation rate for high schools
+        if school.get('graduation_rate'):
+            html += f"""
+                <div>
+                    <div style="color: #6b7280; font-size: 0.85rem;">Graduation Rate</div>
+                    <div style="font-size: 1.1rem; font-weight: 600; color: #1f2937;">{school.get('graduation_rate', 'N/A')}%</div>
+                </div>
+            """
+        
+        # Add AP courses if available (only for high schools with valid data)
+        ap_courses = school.get('ap_courses', 0)
+        if school.get('school_level') == 3 and ap_courses and ap_courses > 0:
+            html += f"""
+                <div>
+                    <div style="color: #6b7280; font-size: 0.85rem;">AP Courses</div>
+                    <div style="font-size: 1.1rem; font-weight: 600; color: #1f2937;">{int(ap_courses)} offered</div>
+                </div>
+            """
+        
+        html += """
+            </div>
+            
+            <div style="margin-top: 15px;">
+                <strong style="color: #1f2937;">Why This School Matches:</strong>
+                <ul style="margin-top: 8px; padding-left: 20px;">
+        """
+        
+        for reason in school.get('match_reasoning', [])[:5]:
+            html += f"<li style='margin: 5px 0; color: #374151;'>{reason}</li>"
+        
+        html += f"""
+                </ul>
+            </div>
+            """
+        
+        # Add enriched information if available
+        enrichment = school.get('enrichment', {})
+        if enrichment and enrichment.get('status') == 'success':
+            # Tours Section
+            tours = enrichment.get('tours', [])
+            if tours:
+                html += """
+            <div style="margin-top: 20px; padding: 15px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 6px;">
+                <h4 style="margin: 0 0 10px 0; color: #92400e; font-size: 1rem;">📅 Upcoming Tours & Events</h4>
+                """
+                for tour in tours[:2]:
+                    tour_type = tour.get('type', 'Event')
+                    date = tour.get('date', tour.get('schedule', 'TBD'))
+                    time = tour.get('time', '')
+                    registration = tour.get('registration', 'Contact school')
+                    html += f"""
+                <div style="margin-bottom: 8px;">
+                    <strong style="color: #78350f;">{tour_type}:</strong> {date} {time}<br>
+                    <span style="font-size: 0.9rem; color: #92400e;">Registration: {registration}</span>
+                </div>
+                    """
+                html += "</div>"
+            
+            # Deadlines Section
+            deadlines = enrichment.get('deadlines', [])
+            if deadlines:
+                html += """
+            <div style="margin-top: 15px; padding: 15px; background: #fecaca; border-left: 4px solid #ef4444; border-radius: 6px;">
+                <h4 style="margin: 0 0 10px 0; color: #7f1d1d; font-size: 1rem;">📋 Important Deadlines</h4>
+                """
+                for deadline in deadlines[:3]:
+                    deadline_type = deadline.get('type', 'Deadline')
+                    date = deadline.get('date', 'TBD')
+                    notes = deadline.get('notes', '')
+                    html += f"""
+                <div style="margin-bottom: 8px;">
+                    <strong style="color: #991b1b;">{deadline_type}:</strong> {date}<br>
+                    <span style="font-size: 0.9rem; color: #7f1d1d;">{notes}</span>
+                </div>
+                    """
+                html += "</div>"
+            
+            # Requirements Section
+            requirements = enrichment.get('requirements', [])
+            if requirements:
+                html += """
+            <div style="margin-top: 15px; padding: 15px; background: #e0e7ff; border-left: 4px solid: #3b82f6; border-radius: 6px;">
+                <h4 style="margin: 0 0 10px 0; color: #1e3a8a; font-size: 1rem;">📄 Enrollment Requirements</h4>
+                <ul style="margin: 0; padding-left: 20px; color: #1e40af;">
+                """
+                for req in requirements[:4]:
+                    html += f"<li style='margin: 5px 0; font-size: 0.9rem;'>{req}</li>"
+                html += """
+                </ul>
+            </div>
+                """
+            
+            # Programs Section
+            programs = enrichment.get('programs', [])
+            if programs:
+                html += """
+            <div style="margin-top: 15px; padding: 15px; background: #d1fae5; border-left: 4px solid #10b981; border-radius: 6px;">
+                <h4 style="margin: 0 0 10px 0; color: #065f46; font-size: 1rem;">🎯 Programs & Services</h4>
+                """
+                for program in programs[:4]:
+                    prog_name = program.get('name', 'Program')
+                    prog_desc = program.get('description', '')
+                    html += f"""
+                <div style="margin-bottom: 8px;">
+                    <strong style="color: #047857;">{prog_name}:</strong> <span style="font-size: 0.9rem; color: #065f46;">{prog_desc}</span>
+                </div>
+                    """
+                html += "</div>"
+            
+            # Contact Section
+            contact = enrichment.get('contact', {})
+            if contact:
+                phone = contact.get('phone', '')
+                email = contact.get('email', '')
+                website = contact.get('website', '')
+                hours = contact.get('office_hours', '')
+                
+                html += f"""
+            <div style="margin-top: 15px; padding: 15px; background: #f3f4f6; border-left: 4px solid #6b7280; border-radius: 6px;">
+                <h4 style="margin: 0 0 10px 0; color: #374151; font-size: 1rem;">📞 Contact Information</h4>
+                <div style="font-size: 0.9rem; color: #4b5563;">
+                    {f'<div style="margin: 4px 0;"><strong>Phone:</strong> {phone}</div>' if phone else ''}
+                    {f'<div style="margin: 4px 0;"><strong>Email:</strong> {email}</div>' if email else ''}
+                    {f'<div style="margin: 4px 0;"><strong>Website:</strong> {website}</div>' if website else ''}
+                    {f'<div style="margin: 4px 0;"><strong>Office Hours:</strong> {hours}</div>' if hours else ''}
+                </div>
+            </div>
+                """
+        
+        html += """
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
+                <span style="background: #e0e7ff; color: #3730a3; padding: 6px 12px; border-radius: 6px; font-size: 0.9rem; font-weight: 500;">
+                    """ + school.get('admission_type', 'Unknown') + """
+                </span>
+            </div>
+        </div>
+        """
+    
+    html += """
+        <div style="margin-top: 40px; padding: 20px; background: #f0f9ff; border-radius: 8px; border: 1px solid #bae6fd;">
+            <h3 style="color: #0c4a6e; margin-top: 0;">💡 All Information Provided Above</h3>
+            <p style="color: #075985;">Each school card above includes complete details about tours, deadlines, requirements, and programs - no need to contact them separately! Just scroll up to see all the information.</p>
+        </div>
+    </div>
+    """
+    
+    return html
 
 if __name__ == "__main__":
     import uvicorn
