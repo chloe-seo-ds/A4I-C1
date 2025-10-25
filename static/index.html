@@ -421,6 +421,28 @@
             flex-direction: column;
         }
 
+        /* Parent Tabs */
+        .parent-tab {
+            position: relative;
+        }
+        
+        .parent-tab.active {
+            background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%) !important;
+            color: white !important;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.3) !important;
+        }
+        
+        .parent-tab:hover:not(.active) {
+            background: rgba(37, 99, 235, 0.05);
+        }
+        
+        .tab-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
         .messages-area {
             flex: 1;
             overflow-y: auto;
@@ -873,11 +895,35 @@
         <!-- Chat Interface -->
         <div class="chat-interface" id="chatInterface">
             <div class="chat-card">
-                <div class="messages-area" id="messagesArea">
-                    <!-- Messages will be added here dynamically -->
+                <!-- Tab Navigation (Parent Only) -->
+                <div id="parentTabs" style="display: none; padding: 1rem; background: transparent;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; max-width: 28rem; margin: 0 auto; background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); padding: 0.25rem; border-radius: 0.75rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+                        <button id="chatTab" class="parent-tab active" style="padding: 0.75rem 1.5rem; border: none; background: transparent; cursor: pointer; font-size: 0.875rem; font-weight: 600; color: #64748b; border-radius: 0.5rem; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 0.5rem;"
+                                onclick="switchParentTab('chat')">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                            </svg>
+                            Ask AI Assistant
+                        </button>
+                        <button id="searchTab" class="parent-tab" style="padding: 0.75rem 1.5rem; border: none; background: transparent; cursor: pointer; font-size: 0.875rem; font-weight: 600; color: #64748b; border-radius: 0.5rem; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 0.5rem;"
+                                onclick="switchParentTab('search')">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                            Find Schools
+                        </button>
+                    </div>
                 </div>
 
-                <div class="input-area">
+                <!-- Chat Tab Content -->
+                <div id="chatTabContent" class="tab-content">
+                    <div class="messages-area" id="messagesArea">
+                        <!-- Messages will be added here dynamically -->
+                    </div>
+                    
+                    <!-- Chat Input Area (only in Chat tab) -->
+                    <div class="input-area">
                     <!-- File preview area -->
                     <div id="filePreview" class="file-preview" style="display: none;">
                         <div class="file-preview-content">
@@ -914,6 +960,24 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
                             </svg>
                         </button>
+                    </div>
+                </div>
+                </div> <!-- Close chatTabContent -->
+
+                <!-- School Search Tab Content -->
+                <div id="searchTabContent" class="tab-content" style="display: none; overflow-y: auto;">
+                    <div id="schoolSearchResults" style="padding: 2rem; max-width: 1400px; margin: 0 auto;">
+                        <!-- School search interface will go here -->
+                        <div style="text-align: center; padding: 4rem 2rem;">
+                            <div style="font-size: 3rem; margin-bottom: 1rem;">🏫</div>
+                            <h2 style="color: #1f2937; margin-bottom: 1rem;">Find the Perfect School</h2>
+                            <p style="color: #6b7280; margin-bottom: 2rem;">Upload your child's report card or describe their needs to get personalized school recommendations</p>
+                            <button id="startSchoolMatch" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem 2rem; border: none; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);"
+                                    onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 12px rgba(102, 126, 234, 0.4)';"
+                                    onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(102, 126, 234, 0.3)';">
+                                Get Started
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -955,9 +1019,36 @@
             document.getElementById('welcomeScreen').style.display = 'none';
             document.getElementById('chatInterface').classList.add('active');
             
+            // Show parent tabs only for parents
+            if (selectedRole === 'parent') {
+                document.getElementById('parentTabs').style.display = 'block';
+            } else {
+                document.getElementById('parentTabs').style.display = 'none';
+            }
+            
             // Add greeting message
             addMessage('assistant', getGreeting(selectedRole));
         });
+
+        // Switch between parent tabs
+        function switchParentTab(tab) {
+            const chatTab = document.getElementById('chatTab');
+            const searchTab = document.getElementById('searchTab');
+            const chatContent = document.getElementById('chatTabContent');
+            const searchContent = document.getElementById('searchTabContent');
+            
+            if (tab === 'chat') {
+                chatTab.classList.add('active');
+                searchTab.classList.remove('active');
+                chatContent.style.display = 'flex';
+                searchContent.style.display = 'none';
+            } else {
+                searchTab.classList.add('active');
+                chatTab.classList.remove('active');
+                searchContent.style.display = 'block';
+                chatContent.style.display = 'none';
+            }
+        }
 
         // Get role-based greeting
         function getGreeting(role) {
@@ -1330,6 +1421,345 @@
                 filePreviewImage.style.display = 'none';
             }
         }
+
+        // School Match Engine functionality
+        document.getElementById('startSchoolMatch').addEventListener('click', () => {
+            showSchoolMatchDialog();
+        });
+
+        // Global functions for school cards (accessible from dynamically loaded HTML)
+        window.schoolsData = [];
+        
+        window.toggleFavorite = function(btn) {
+            const heart = btn.querySelector('.heart-icon');
+            if (btn.classList.contains('favorited')) {
+                btn.classList.remove('favorited');
+                heart.setAttribute('fill', 'none');
+                heart.setAttribute('stroke', '#94a3b8');
+            } else {
+                btn.classList.add('favorited');
+                heart.setAttribute('fill', '#ec4899');
+                heart.setAttribute('stroke', '#ec4899');
+            }
+        };
+        
+        window.showSchoolDetails = function(schoolId) {
+            console.log('showSchoolDetails called with ID:', schoolId);
+            
+            // Check if data is loaded
+            if (!window.schoolsData || window.schoolsData.length === 0) {
+                console.error('School data not loaded yet!');
+                alert('School data is loading, please try again in a moment.');
+                return;
+            }
+            
+            console.log('Available schools:', window.schoolsData);
+            
+            const detailsDiv = document.getElementById('details-' + schoolId);
+            if (!detailsDiv) {
+                console.error('Details div not found for:', schoolId);
+                return;
+            }
+            
+            // Try to find school by ncessch or fallback to index-based ID
+            let school = window.schoolsData.find(s => s.ncessch === schoolId);
+            
+            // If not found and schoolId looks like "school_X", try index-based lookup
+            if (!school && schoolId.startsWith('school_')) {
+                const index = parseInt(schoolId.replace('school_', '')) - 1;
+                school = window.schoolsData[index];
+                console.log('Found school by index:', index, school);
+            }
+            
+            if (!school) {
+                console.error('School not found with ID:', schoolId);
+                console.log('Available school IDs:', window.schoolsData.map((s, i) => ({ncessch: s.ncessch, fallback: `school_${i+1}`})));
+                return;
+            }
+            
+            if (detailsDiv.style.display === 'none' || detailsDiv.style.display === '') {
+                let html = '';
+                
+                if (school.match_reasoning && school.match_reasoning.length > 0) {
+                    html += '<h4 style="color: #1f2937; font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem;">Why This School Matches:</h4><ul style="margin: 0 0 1rem 1.25rem;">';
+                    school.match_reasoning.slice(0, 5).forEach(reason => {
+                        html += `<li style="margin: 0.5rem 0; color: #374151;">${reason}</li>`;
+                    });
+                    html += '</ul>';
+                }
+                
+                const enrichment = school.enrichment || {};
+                if (enrichment.status === 'success') {
+                    if (enrichment.tours && enrichment.tours.length > 0) {
+                        html += '<h4 style="color: #92400e; font-size: 1rem; font-weight: 600; margin: 1rem 0 0.75rem;">📅 Upcoming Tours</h4>';
+                        enrichment.tours.slice(0, 2).forEach(tour => {
+                            html += `<div style="margin-bottom: 0.5rem; color: #374151;"><strong>${tour.type}:</strong> ${tour.date || tour.schedule} ${tour.time || ''}</div>`;
+                        });
+                    }
+                    
+                    if (enrichment.deadlines && enrichment.deadlines.length > 0) {
+                        html += '<h4 style="color: #991b1b; font-size: 1rem; font-weight: 600; margin: 1rem 0 0.75rem;">📋 Important Deadlines</h4>';
+                        enrichment.deadlines.slice(0, 3).forEach(deadline => {
+                            html += `<div style="margin-bottom: 0.5rem; color: #374151;"><strong>${deadline.type}:</strong> ${deadline.date}</div>`;
+                        });
+                    }
+                    
+                    if (enrichment.requirements && enrichment.requirements.length > 0) {
+                        html += '<h4 style="color: #1e40af; font-size: 1rem; font-weight: 600; margin: 1rem 0 0.75rem;">📄 Enrollment Requirements</h4>';
+                        html += '<ul style="margin: 0 0 1rem 1.25rem; color: #374151;">';
+                        enrichment.requirements.slice(0, 5).forEach(req => {
+                            html += `<li style="margin: 0.5rem 0; font-size: 0.9rem;">${req}</li>`;
+                        });
+                        html += '</ul>';
+                    }
+                    
+                    if (enrichment.programs && enrichment.programs.length > 0) {
+                        html += '<h4 style="color: #047857; font-size: 1rem; font-weight: 600; margin: 1rem 0 0.75rem;">🎯 Programs & Services</h4>';
+                        enrichment.programs.slice(0, 4).forEach(program => {
+                            const progName = program.name || program;
+                            const progDesc = program.description || '';
+                            if (progDesc) {
+                                html += `<div style="margin-bottom: 0.5rem; color: #374151;"><strong>${progName}:</strong> ${progDesc}</div>`;
+                            } else {
+                                html += `<div style="margin-bottom: 0.5rem; color: #374151;">• ${progName}</div>`;
+                            }
+                        });
+                    }
+                    
+                    if (enrichment.contact) {
+                        html += '<h4 style="color: #374151; font-size: 1rem; font-weight: 600; margin: 1rem 0 0.75rem;">📞 Contact</h4>';
+                        if (enrichment.contact.phone) html += `<div style="color: #374151;">Phone: ${enrichment.contact.phone}</div>`;
+                        if (enrichment.contact.website) html += `<div style="color: #374151;">Website: ${enrichment.contact.website}</div>`;
+                    }
+                } else {
+                    // No enrichment data available
+                    html += '<div style="padding: 1rem; background: #f3f4f6; border-radius: 0.5rem; border: 1px solid #d1d5db;">';
+                    html += '<p style="margin: 0; color: #6b7280; font-size: 0.875rem;">Detailed information is being loaded. Basic stats and contact information are shown in the card above.</p>';
+                    html += '</div>';
+                }
+                
+                detailsDiv.innerHTML = html || '<p style="color: #6b7280;">Loading details...</p>';
+                detailsDiv.style.display = 'block';
+            } else {
+                detailsDiv.style.display = 'none';
+            }
+        };
+
+        function showSchoolMatchDialog() {
+            // Create modal dialog
+            const modal = document.createElement('div');
+            modal.id = 'schoolMatchModal';
+            modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(4px);';
+            
+            modal.innerHTML = `
+                <div style="background: white; border-radius: 1rem; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px rgba(0,0,0,0.25); animation: fadeInUp 0.3s ease-out;">
+                    <div style="padding: 2rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                            <h2 style="color: #1f2937; font-size: 1.5rem; margin: 0;">🏫 Find Your Child's Best School</h2>
+                            <button id="closeModal" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; padding: 0.5rem; border-radius: 0.5rem; transition: background 0.2s;"
+                                    onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='transparent'">✕</button>
+                        </div>
+                        
+                        <p style="color: #6b7280; margin-bottom: 1.5rem; line-height: 1.6;">
+                            Tell us about your child and we'll recommend the best matching schools from our database of 10,000+ California schools.
+                        </p>
+                        
+                        <form id="schoolMatchForm">
+                            <div style="margin-bottom: 1.5rem;">
+                                <label style="display: block; color: #374151; font-weight: 600; margin-bottom: 0.5rem;">
+                                    Describe your child's needs:
+                                </label>
+                                <textarea 
+                                    id="childDescription" 
+                                    placeholder="Example: My daughter is entering 6th grade. She loves science and math, needs small class sizes, and we live in San Jose, CA 95112."
+                                    style="width: 100%; min-height: 120px; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem; font-size: 1rem; font-family: inherit; resize: vertical; transition: border-color 0.2s;"
+                                    onfocus="this.style.borderColor='#667eea'" onblur="this.style.borderColor='#e5e7eb'"
+                                ></textarea>
+                            </div>
+                            
+                            <div style="margin-bottom: 1.5rem;">
+                                <label style="display: block; color: #374151; font-weight: 600; margin-bottom: 0.5rem;">
+                                    Upload documents (optional):
+                                </label>
+                                <div style="border: 2px dashed #d1d5db; border-radius: 0.5rem; padding: 1.5rem; text-align: center; cursor: pointer; transition: all 0.2s;" 
+                                     id="schoolMatchDropzone"
+                                     onclick="document.getElementById('schoolMatchFileInput').click()"
+                                     ondragover="event.preventDefault(); this.style.borderColor='#667eea'; this.style.background='#f5f3ff';"
+                                     ondragleave="this.style.borderColor='#d1d5db'; this.style.background='transparent';"
+                                     ondrop="handleSchoolMatchDrop(event)">
+                                    <input type="file" id="schoolMatchFileInput" accept="image/*,application/pdf" style="display: none;" onchange="handleSchoolMatchFile(event.target.files[0])">
+                                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" style="margin: 0 auto 0.5rem;">
+                                        <path d="M7 18a4.6 4.4 0 0 1 0 -9a5 4.5 0 0 1 11 2h1a3.5 3.5 0 0 1 0 7h-1"></path>
+                                        <polyline points="9 15 12 12 15 15"></polyline>
+                                        <line x1="12" y1="12" x2="12" y2="21"></line>
+                                    </svg>
+                                    <p style="color: #6b7280; margin: 0; font-size: 0.875rem;">
+                                        Click to upload or drag & drop<br>
+                                        <span style="font-size: 0.75rem; color: #9ca3af;">Report card, IEP, or test scores (PDF, JPG, PNG)</span>
+                                    </p>
+                                    <div id="schoolMatchFilePreview" style="display: none; margin-top: 1rem; padding: 0.75rem; background: #f0f9ff; border-radius: 0.5rem; color: #0369a1; font-size: 0.875rem;"></div>
+                                </div>
+                            </div>
+                            
+                            <button type="submit" id="matchSchoolsBtn" style="width: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem; border: none; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);"
+                                    onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 12px rgba(102, 126, 234, 0.4)';"
+                                    onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(102, 126, 234, 0.3)';">
+                                <span style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                    </svg>
+                                    Find Matching Schools
+                                </span>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Close modal handlers
+            document.getElementById('closeModal').addEventListener('click', () => {
+                modal.remove();
+            });
+            
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+            
+            // Form submission
+            document.getElementById('schoolMatchForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await submitSchoolMatchRequest();
+            });
+        }
+
+        let schoolMatchFile = null;
+
+        function handleSchoolMatchFile(file) {
+            if (file) {
+                schoolMatchFile = file;
+                const preview = document.getElementById('schoolMatchFilePreview');
+                preview.style.display = 'block';
+                preview.textContent = `📎 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB)`;
+            }
+        }
+
+        function handleSchoolMatchDrop(event) {
+            event.preventDefault();
+            const dropzone = document.getElementById('schoolMatchDropzone');
+            dropzone.style.borderColor = '#d1d5db';
+            dropzone.style.background = 'transparent';
+            
+            const file = event.dataTransfer.files[0];
+            if (file) {
+                handleSchoolMatchFile(file);
+            }
+        }
+
+        async function submitSchoolMatchRequest() {
+            const description = document.getElementById('childDescription').value.trim();
+            const submitBtn = document.getElementById('matchSchoolsBtn');
+            
+            if (!description && !schoolMatchFile) {
+                alert('Please provide either a description or upload a document.');
+                return;
+            }
+            
+            // Disable button and show loading
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = `
+                <span style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M12 6v6l4 2"></path>
+                    </svg>
+                    Analyzing & Matching Schools...
+                </span>
+            `;
+            
+            try {
+                // Build FormData
+                const formData = new FormData();
+                if (description) {
+                    formData.append('message', description);
+                }
+                if (schoolMatchFile) {
+                    formData.append('file', schoolMatchFile);
+                }
+                
+                // Send request to school match endpoint
+                const response = await fetch('/match_schools', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    // Close modal
+                    document.getElementById('schoolMatchModal').remove();
+                    
+                    // Show results in the Find Schools tab
+                    const container = document.getElementById('schoolSearchResults');
+                    container.innerHTML = result.html;
+                    
+                    // Execute any script tags (innerHTML doesn't execute scripts automatically)
+                    const scripts = container.querySelectorAll('script');
+                    scripts.forEach(script => {
+                        const newScript = document.createElement('script');
+                        if (script.src) {
+                            newScript.src = script.src;
+                        } else {
+                            newScript.textContent = script.textContent;
+                        }
+                        document.body.appendChild(newScript);
+                        document.body.removeChild(newScript); // Clean up after execution
+                    });
+                    
+                    console.log('School data loaded:', window.schoolsData);
+                    
+                    // Switch to Find Schools tab if not already there
+                    switchParentTab('search');
+                } else {
+                    alert('Error: ' + (result.message || 'Failed to match schools'));
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = `
+                        <span style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                            </svg>
+                            Find Matching Schools
+                        </span>
+                    `;
+                }
+                
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to match schools. Please try again.');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = `
+                    <span style="display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                        Find Matching Schools
+                    </span>
+                `;
+            }
+        }
+
+        // Add CSS animation for spinning
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+        `;
+        document.head.appendChild(style);
     </script>
 </body>
 </html>

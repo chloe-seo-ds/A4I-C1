@@ -25,6 +25,7 @@ RUN uv sync --frozen --no-dev
 # Copy application code
 COPY agents/ ./agents/
 COPY tools/ ./tools/
+COPY mcp_servers/ ./mcp_servers/
 COPY static/ ./static/
 COPY api.py .
 COPY main.py .

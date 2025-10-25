@@ -20,6 +20,15 @@ export REGION="us-west1"
 # Load secrets (API keys, tokens, etc.)
 # These are stored separately for security
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load Google AI API Key (for Gemini)
+if [ -f "${SCRIPT_DIR}/secrets/google_api_key.txt" ]; then
+    export GOOGLE_API_KEY=$(cat "${SCRIPT_DIR}/secrets/google_api_key.txt" | tr -d '\n')
+else
+    echo "⚠️  Warning: secrets/google_api_key.txt not found"
+fi
+
+# Load Google Maps API Key
 if [ -f "${SCRIPT_DIR}/secrets/maps_api_key.txt" ]; then
     export GOOGLE_MAPS_API_KEY=$(cat "${SCRIPT_DIR}/secrets/maps_api_key.txt" | tr -d '\n')
 else
@@ -37,6 +46,11 @@ echo "  SPANNER_DATABASE_ID: ${SPANNER_DATABASE_ID}"
 echo "  GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION}"
 echo "  REPO_NAME: ${REPO_NAME}"
 echo "  REGION: ${REGION}"
+if [ -n "${GOOGLE_API_KEY}" ]; then
+    echo "  GOOGLE_API_KEY: ${GOOGLE_API_KEY:0:20}... ✅"
+else
+    echo "  GOOGLE_API_KEY: NOT SET ⚠️"
+fi
 if [ -n "${GOOGLE_MAPS_API_KEY}" ]; then
     echo "  GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:0:20}... ✅"
 else
